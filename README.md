@@ -1,0 +1,3 @@
+# Lune
+
+Project initialized.
