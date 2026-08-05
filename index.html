@@ -1,0 +1,2188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lune — AI Quota Dashboard</title>
+<meta name="description" content="Monitor AI usage quota across multiple IDE accounts in a unified local dashboard.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet">
+<style>
+
+/* ═══════════════════════════════════════════════════════
+   RESET & BASE
+═══════════════════════════════════════════════════════ */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; overflow: hidden; }
+button { font-family: inherit; cursor: pointer; }
+
+body {
+  font-family: 'Inter', sans-serif;
+  background: #09090b;
+  color: #e4e4e7;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  min-width: 900px;
+}
+
+/* ═══════════════════════════════════════════════════════
+   APP LAYOUT — 3-COLUMN GRID
+═══════════════════════════════════════════════════════ */
+.app {
+  display: grid;
+  grid-template-columns: 64px 430px 1fr;
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* ═══════════════════════════════════════════════════════
+   LEFT RAIL / SIDEBAR
+═══════════════════════════════════════════════════════ */
+.sidebar {
+  background: #18181b;
+  border-right: 1px solid #27272a;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 14px 0;
+  z-index: 10;
+}
+
+.sidebar-logo {
+  width: 36px;
+  height: 36px;
+  background: #27272a;
+  border: 1px solid #3f3f46;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 20px;
+  flex-shrink: 0;
+  transition: background .15s, border-color .15s;
+}
+.sidebar-logo:hover { background: #3f3f46; border-color: #71717a; }
+
+.sidebar-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  width: 100%;
+  padding: 0 8px;
+  align-items: center;
+}
+
+/* ── TEMP: IPC bridge test button (remove in next phase) ── */
+#ipc-test-btn {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: rgba(129, 140, 248,.10);
+  color: #818cf8;
+  font-size: 16px;
+  cursor: pointer;
+  transition: background .15s, transform .1s;
+  position: relative;
+}
+#ipc-test-btn:hover { background: rgba(129, 140, 248,.22); transform: translateY(-1px); }
+#ipc-test-btn:active { transform: translateY(0); }
+#ipc-test-btn[title]::after {
+  content: attr(title);
+  position: absolute;
+  left: 52px; top: 50%;
+  transform: translateY(-50%);
+  background: #27272a;
+  color: #e4e4e7;
+  font-size: 11px;
+  white-space: nowrap;
+  padding: 3px 8px;
+  border-radius: 5px;
+  border: 1px solid #27272a;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity .15s;
+}
+#ipc-test-btn:hover::after { opacity: 1; }
+/* ──────────────────────────────────────────────── */
+
+.sidebar-bottom {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: 10px 8px 0;
+  align-items: center;
+  border-top: 1px solid #27272a;
+  margin-top: 10px;
+}
+
+.nav-btn {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #71717a;
+  border: none;
+  background: transparent;
+  transition: background .15s, color .15s, transform .1s;
+  position: relative;
+}
+.nav-btn:hover { background: #27272a; color: #a1a1aa; transform: translateY(-1px); }
+.nav-btn.active { background: rgba(129, 140, 248,.12); color: #818cf8; }
+.nav-btn.active::before {
+  content: '';
+  position: absolute;
+  left: -8px; top: 50%;
+  transform: translateY(-50%);
+  width: 3px; height: 20px;
+  background: #818cf8;
+  border-radius: 0 3px 3px 0;
+}
+
+/* ═══════════════════════════════════════════════════════
+   SHARED PANEL HEADER — exactly 84px tall
+═══════════════════════════════════════════════════════ */
+.panel-header {
+  height: 84px;
+  min-height: 84px;
+  max-height: 84px;
+  border-bottom: 1px solid #27272a;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 0 20px;
+  flex-shrink: 0;
+  background: #18181b;
+}
+
+/* ═══════════════════════════════════════════════════════
+   MIDDLE COLUMN — ACCOUNTS LIST
+═══════════════════════════════════════════════════════ */
+.accounts-panel {
+  border-right: 1px solid #27272a;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.panel-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.panel-title {
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 15px;
+  font-weight: 700;
+  color: #e4e4e7;
+  letter-spacing: -.01em;
+}
+
+.panel-subtitle {
+  font-size: 11.5px;
+  color: #71717a;
+  margin-top: 4px;
+}
+
+.refresh-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: #27272a;
+  border: 1px solid #27272a;
+  color: #a1a1aa;
+  font-size: 11.5px;
+  font-weight: 500;
+  padding: 5px 11px;
+  border-radius: 8px;
+  transition: all .15s;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.refresh-btn:hover { background: #27272a; color: #e4e4e7; border-color: #3f3f46; }
+.refresh-icon { transition: transform .55s cubic-bezier(.4,0,.2,1); }
+.refresh-btn.spinning .refresh-icon { transform: rotate(360deg); }
+
+.add-btn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  background: rgba(129, 140, 248,.12);
+  border: 1px solid rgba(129, 140, 248,.28);
+  color: #818cf8;
+  font-size: 11.5px;
+  font-weight: 600;
+  padding: 5px 11px;
+  border-radius: 8px;
+  transition: all .15s;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.add-btn:hover { background: rgba(129, 140, 248,.22); border-color: rgba(129, 140, 248,.45); }
+
+.unsynced-label {
+  font-size: 10.5px;
+  color: #71717a;
+  font-style: italic;
+}
+
+.accounts-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 10px;
+}
+.accounts-list::-webkit-scrollbar { width: 4px; }
+.accounts-list::-webkit-scrollbar-track { background: transparent; }
+.accounts-list::-webkit-scrollbar-thumb { background: #27272a; border-radius: 2px; }
+
+/* ═══════════════════════════════════════════════════════
+   ACCOUNT CARDS
+═══════════════════════════════════════════════════════ */
+.account-card {
+  background: #18181b;
+  border: 1px solid #27272a;
+  border-left: 3px solid transparent;
+  border-radius: 10px;
+  padding: 12px 12px 10px;
+  margin-bottom: 7px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  transition: background .12s, border-color .12s, transform .1s;
+  user-select: none;
+  outline: none;
+}
+.account-card:hover  { background: #27272a; transform: translateX(1px); }
+.account-card:focus-visible { outline: 2px solid #818cf8; outline-offset: 2px; }
+.account-card:active { transform: translateX(0); }
+
+.account-card.selected             { background: rgba(129, 140, 248,.05); border-left-color: #818cf8; }
+.account-card.selected.status-warn { background: rgba(251, 191, 36,.05); border-left-color: #fbbf24; }
+.account-card.selected.status-crit { background: rgba(248, 113, 113,.05); border-left-color: #f87171; }
+
+.card-top-row { display: flex; align-items: center; gap: 9px; }
+
+.card-rank {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: #71717a;
+  width: 14px;
+  flex-shrink: 0;
+  text-align: center;
+}
+
+.avatar {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 10px;
+  font-weight: 700;
+  color: rgba(255,255,255,.88);
+  flex-shrink: 0;
+  border: 1px solid rgba(255,255,255,.08);
+}
+
+.card-info { flex: 1; min-width: 0; }
+.card-name  { font-size: 12.5px; font-weight: 600; color: #e4e4e7; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.card-email { font-size: 11px; color: #71717a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; }
+
+.launch-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: transparent;
+  border: 1px solid #27272a;
+  color: #71717a;
+  font-size: 10.5px;
+  font-weight: 500;
+  padding: 3px 8px;
+  border-radius: 6px;
+  transition: all .15s;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+.launch-btn:hover { background: #27272a; color: #a1a1aa; border-color: #3f3f46; }
+
+.card-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.remove-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  background: transparent;
+  border: 1px solid #27272a;
+  color: #71717a;
+  border-radius: 6px;
+  transition: all .15s;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+.remove-btn:hover {
+  background: rgba(248, 113, 113, .12);
+  color: #f87171;
+  border-color: rgba(248, 113, 113, .3);
+}
+
+.card-quota-row { display: flex; align-items: center; gap: 9px; padding-left: 23px; }
+
+.quota-bar-wrap {
+  flex: 1;
+  height: 4px;
+  background: #27272a;
+  border-radius: 99px;
+  overflow: visible;
+}
+.quota-bar-fill {
+  height: 100%;
+  border-radius: 99px;
+  transition: width .6s cubic-bezier(.4,0,.2,1);
+}
+/* Vivid traffic-light colors — these list bars are the "at a glance" signal */
+.quota-bar-fill.healthy  { background: #34d399; }
+.quota-bar-fill.warn     { background: #fbbf24; }
+.quota-bar-fill.critical { background: #f87171; }
+
+.quota-pct {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10.5px;
+  color: #a1a1aa;
+  min-width: 30px;
+  text-align: right;
+  flex-shrink: 0;
+}
+
+/* ═══════════════════════════════════════════════════════
+   RIGHT — DETAIL PANEL
+═══════════════════════════════════════════════════════ */
+.detail-panel { display: flex; flex-direction: column; overflow: hidden; background: #09090b; }
+
+.detail-panel .panel-header {
+  flex-direction: row;
+  align-items: center;
+  gap: 12px;
+  padding: 0 22px;
+}
+
+.detail-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 13px;
+  font-weight: 700;
+  color: rgba(255,255,255,.88);
+  flex-shrink: 0;
+  border: 1px solid rgba(255,255,255,.1);
+}
+
+.detail-name-wrap { flex: 1; min-width: 0; }
+.detail-name  { font-family: 'Space Grotesk', sans-serif; font-size: 14px; font-weight: 700; color: #e4e4e7; letter-spacing: -.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.detail-email { font-size: 11.5px; color: #71717a; margin-top: 2px; }
+
+.plan-badge {
+  font-size: 10.5px;
+  font-weight: 600;
+  padding: 3px 9px;
+  border-radius: 99px;
+  white-space: nowrap;
+  border: 1px solid;
+  flex-shrink: 0;
+  letter-spacing: .01em;
+}
+.plan-badge.healthy  { background: rgba(129, 140, 248,.10); color: #818cf8; border-color: rgba(129, 140, 248,.28); }
+.plan-badge.warn     { background: rgba(251, 191, 36,.10); color: #fbbf24; border-color: rgba(251, 191, 36,.28); }
+.plan-badge.critical { background: rgba(248, 113, 113,.10); color: #f87171; border-color: rgba(248, 113, 113,.28); }
+
+.launch-main-btn {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid rgba(129, 140, 248,.28);
+  color: #818cf8;
+  background: rgba(129, 140, 248,.08);
+  font-size: 12.5px;
+  font-weight: 600;
+  padding: 7px 16px;
+  border-radius: 8px;
+  transition: all .18s;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.launch-main-btn:hover {
+  background: rgba(129, 140, 248,.15);
+  border-color: rgba(129, 140, 248,.45);
+  box-shadow: 0 0 18px rgba(129, 140, 248,.12);
+  transform: translateY(-1px);
+}
+.launch-main-btn:active { transform: translateY(0); }
+
+/* ─── Detail scrollable content ─── */
+.detail-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px 22px 16px;
+}
+.detail-content::-webkit-scrollbar { width: 4px; }
+.detail-content::-webkit-scrollbar-track { background: transparent; }
+.detail-content::-webkit-scrollbar-thumb { background: #27272a; border-radius: 2px; }
+
+.section-title {
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .1em;
+  color: #3f3f46;
+  margin-bottom: 10px;
+}
+
+/* ═══════════════════════════════════════════════════════
+   QUOTA POOL CARDS
+═══════════════════════════════════════════════════════ */
+.pools-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
+.pool-column {
+  display: flex;
+  flex-direction: column;
+}
+
+.pool-card {
+  background: #18181b;
+  border: 1px solid #27272a;
+  border-radius: 12px;
+  padding: 16px 18px 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+  transition: border-radius .2s, border-color .15s, background .15s;
+  cursor: pointer;
+  user-select: none;
+}
+.pool-card:hover { background: #27272a; border-color: #3f3f46; }
+.pool-column.expanded .pool-card {
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+  border-color: #3f3f46;
+  background: #18181b;
+}
+
+.pool-card-header {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.pool-card-title-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.pool-card-title {
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 14px;
+  font-weight: 700;
+  color: #f4f4f5;
+}
+.pool-info-icon {
+  width: 14px;
+  height: 14px;
+  color: #71717a;
+  flex-shrink: 0;
+  cursor: help;
+}
+.pool-card-subtitle {
+  font-size: 11px;
+  font-weight: 500;
+  color: #a1a1aa;
+}
+.pool-card-desc {
+  font-size: 11.5px;
+  color: #71717a;
+  line-height: 1.45;
+}
+.pool-card-body {
+  margin-top: 2px;
+  margin-bottom: 2px;
+}
+.pool-pct-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.pool-pct-num {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 26px;
+  font-weight: 700;
+  line-height: 1;
+}
+.compact-ring-svg {
+  flex-shrink: 0;
+}
+.pool-card-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  color: #71717a;
+  font-size: 10.5px;
+}
+.pool-details-label {
+  font-size: 10.5px;
+  color: #71717a;
+}
+
+/* Pool expand chevron */
+.pool-chevron {
+  width: 14px; height: 14px;
+  color: #71717a;
+  transition: transform .25s cubic-bezier(.4,0,.2,1), color .15s;
+  flex-shrink: 0;
+}
+.pool-column.expanded .pool-chevron { transform: rotate(180deg); color: #818cf8; }
+
+/* Expandable stats panel beneath a pool card — height set inline via JS (scrollHeight)
+   so it fits real content instead of a guessed fixed max-height */
+.pool-stats-panel {
+  background: #18181b;
+  border: 1px solid #3f3f46;
+  border-top: none;
+  border-radius: 0 0 12px 12px;
+  overflow: hidden;
+  max-height: 0;
+  opacity: 0;
+  padding: 0 14px;
+  transition: max-height .32s cubic-bezier(.4,0,.2,1), opacity .25s ease, padding .32s cubic-bezier(.4,0,.2,1);
+}
+.pool-column.expanded .pool-stats-panel {
+  opacity: 1;
+  padding: 12px 14px 14px;
+}
+
+.pool-unit-breakdown {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.pool-unit-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px;
+}
+.pool-unit-main {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+.pool-unit-num {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1;
+}
+.pool-unit-fraction {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  color: #3f3f46;
+}
+.pool-unit-label {
+  font-size: 10.5px;
+  color: #a1a1aa;
+  font-weight: 500;
+}
+.pool-unit-consumed {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  color: #71717a;
+}
+.pool-bar-wrap { height: 4px; background: #27272a; border-radius: 99px; overflow: hidden; }
+.pool-bar-fill { height: 100%; border-radius: 99px; transition: width .5s cubic-bezier(.4,0,.2,1); }
+.pool-bar-fill.healthy  { background: #818cf8; }
+.pool-bar-fill.warn     { background: #fbbf24; }
+.pool-bar-fill.critical { background: #f87171; }
+
+/* Per-model breakdown list inside the expanded panel */
+.model-breakdown {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding-top: 2px;
+  border-top: 1px solid #27272a;
+}
+.model-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.model-row-name {
+  font-size: 10.5px;
+  color: #a1a1aa;
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.model-tag {
+  font-size: 8.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  padding: 1.5px 5px;
+  border-radius: 4px;
+  background: rgba(129, 140, 248,.12);
+  color: #818cf8;
+  border: 1px solid rgba(129, 140, 248,.25);
+  flex-shrink: 0;
+}
+.model-tag.fast {
+  background: rgba(167, 139, 250,.12);
+  color: #a78bfa;
+  border-color: rgba(167, 139, 250,.25);
+}
+.model-row-frac {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  color: #71717a;
+  flex-shrink: 0;
+  width: 40px;
+  text-align: right;
+}
+
+.ring-container { position: relative; width: 90px; height: 90px; flex-shrink: 0; }
+.ring-container svg { position: absolute; inset: 0; overflow: visible; }
+.ring-label {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  gap: 1px;
+}
+.ring-pct { font-family: 'JetBrains Mono', monospace; font-size: 17px; font-weight: 600; line-height: 1; }
+.ring-sublabel { font-size: 9px; color: #71717a; text-transform: uppercase; letter-spacing: .06em; }
+
+.pool-info { text-align: center; width: 100%; }
+.pool-name { font-family: 'Space Grotesk', sans-serif; font-size: 12.5px; font-weight: 700; color: #e4e4e7; margin-bottom: 5px; }
+.pool-models { font-size: 10.5px; color: #71717a; line-height: 1.65; margin-bottom: 7px; }
+.pool-reset { font-size: 10.5px; color: #71717a; display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 4px; }
+.pool-reset-val { font-family: 'JetBrains Mono', monospace; font-size: 10.5px; color: #a1a1aa; }
+
+/* ═══════════════════════════════════════════════════════
+   STAT GRID (4 columns)
+═══════════════════════════════════════════════════════ */
+.stat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 9px; margin-bottom: 16px; }
+
+.stat-card {
+  background: #18181b;
+  border: 1px solid #27272a;
+  border-radius: 10px;
+  padding: 13px 12px 11px;
+  transition: border-color .15s, background .15s;
+}
+.stat-card:hover { background: #27272a; }
+
+.stat-label {
+  font-size: 10.5px;
+  color: #71717a;
+  margin-bottom: 9px;
+  display: inline-block;
+  line-height: 1.3;
+}
+.stat-label.has-tooltip {
+  border-bottom: 1px dashed #3f3f46;
+  cursor: help;
+  transition: border-color .15s, color .15s;
+}
+.stat-label.has-tooltip:hover { border-bottom-color: #71717a; color: #a1a1aa; }
+
+.stat-value { font-family: 'JetBrains Mono', monospace; font-size: 19px; font-weight: 600; color: #e4e4e7; line-height: 1; display: block; }
+.stat-sub { font-size: 10px; color: #71717a; margin-top: 5px; }
+
+/* ═══════════════════════════════════════════════════════
+   SYNC ROW
+═══════════════════════════════════════════════════════ */
+.sync-row { display: flex; align-items: center; gap: 8px; padding-top: 14px; border-top: 1px solid #27272a; }
+.sync-text { font-size: 11.5px; color: #71717a; flex: 1; }
+.sync-time { font-family: 'JetBrains Mono', monospace; color: #a1a1aa; }
+
+.refresh-acc-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  border: 1px solid #27272a;
+  color: #818cf8;
+  font-size: 11px;
+  font-weight: 500;
+  padding: 5px 11px;
+  border-radius: 8px;
+  transition: all .15s;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.refresh-acc-btn:hover { background: rgba(129, 140, 248,.08); border-color: rgba(129, 140, 248,.35); color: #a5b4fc; }
+.refresh-acc-btn .refresh-icon { width: 11px; height: 11px; transition: transform .55s cubic-bezier(.4,0,.2,1); }
+.refresh-acc-btn.spinning .refresh-icon { transform: rotate(360deg); }
+
+.pulse-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; position: relative; }
+.pulse-dot::after { content: ''; position: absolute; inset: 0; border-radius: 50%; animation: pulse-ring 2.2s ease-out infinite; }
+.pulse-dot.healthy  { background: #818cf8; }
+.pulse-dot.healthy::after  { background: rgba(129, 140, 248,.45); }
+.pulse-dot.warn     { background: #fbbf24; }
+.pulse-dot.warn::after     { background: rgba(251, 191, 36,.45); }
+.pulse-dot.critical { background: #f87171; }
+.pulse-dot.critical::after { background: rgba(248, 113, 113,.45); }
+
+@keyframes pulse-ring {
+  0%   { transform: scale(1);   opacity: .9; }
+  65%  { transform: scale(2.8); opacity: 0;  }
+  100% { transform: scale(1);   opacity: 0;  }
+}
+
+/* ═══════════════════════════════════════════════════════
+   FLOATING TOOLTIP
+═══════════════════════════════════════════════════════ */
+.tooltip {
+  position: fixed;
+  z-index: 9999;
+  background: #27272a;
+  border: 1px solid #3f3f46;
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 11.5px;
+  color: #a1a1aa;
+  max-width: 230px;
+  line-height: 1.55;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(4px);
+  transition: opacity .15s ease, transform .15s ease;
+  box-shadow: 0 8px 28px rgba(0,0,0,.5);
+}
+.tooltip.visible { opacity: 1; transform: translateY(0); }
+
+/* ═══════════════════════════════════════════════════════
+   MODAL DIALOG
+═══════════════════════════════════════════════════════ */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  background: rgba(0,0,0,0.65);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .2s ease;
+}
+.modal-backdrop.open {
+  opacity: 1;
+  pointer-events: auto;
+}
+.modal-card {
+  background: #18181b;
+  border: 1px solid #27272a;
+  border-radius: 14px;
+  width: 380px;
+  max-width: 90vw;
+  padding: 22px;
+  box-shadow: 0 16px 40px rgba(0,0,0,0.6);
+  transform: translateY(8px);
+  transition: transform .2s ease;
+}
+.modal-backdrop.open .modal-card {
+  transform: translateY(0);
+}
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+.modal-title {
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 16px;
+  font-weight: 700;
+  color: #e4e4e7;
+}
+.modal-close {
+  background: transparent;
+  border: none;
+  color: #71717a;
+  font-size: 20px;
+  line-height: 1;
+  padding: 2px 6px;
+  border-radius: 6px;
+  transition: color .15s, background .15s;
+}
+.modal-close:hover { color: #e4e4e7; background: #27272a; }
+.modal-sub {
+  font-size: 11.5px;
+  color: #71717a;
+  margin-bottom: 18px;
+}
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+.form-group label {
+  font-size: 11px;
+  font-weight: 600;
+  color: #a1a1aa;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+.form-group input {
+  background: #09090b;
+  border: 1px solid #27272a;
+  border-radius: 8px;
+  padding: 9px 12px;
+  font-size: 12.5px;
+  color: #e4e4e7;
+  outline: none;
+  transition: border-color .15s;
+}
+.form-group input:focus {
+  border-color: #818cf8;
+}
+.modal-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 20px;
+}
+.modal-cancel-btn {
+  background: transparent;
+  border: 1px solid #27272a;
+  color: #a1a1aa;
+  font-size: 12px;
+  font-weight: 500;
+  padding: 7px 14px;
+  border-radius: 8px;
+  transition: all .15s;
+}
+.modal-cancel-btn:hover { background: #27272a; color: #e4e4e7; }
+.modal-submit-btn {
+  background: #818cf8;
+  border: none;
+  color: #09090b;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 7px 16px;
+  border-radius: 8px;
+  transition: background .15s;
+}
+.modal-submit-btn:hover { background: #a5b4fc; }
+
+/* ═══════════════════════════════════════════════════════
+   EMPTY PROMPT STATE
+═══════════════════════════════════════════════════════ */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 60px 20px;
+  text-align: center;
+}
+.empty-icon {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: #18181b;
+  border: 1px solid #27272a;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 16px;
+}
+.empty-title {
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 16px;
+  font-weight: 700;
+  color: #e4e4e7;
+  margin-bottom: 6px;
+}
+.empty-sub {
+  font-size: 12px;
+  color: #71717a;
+  max-width: 280px;
+  margin-bottom: 20px;
+  line-height: 1.5;
+}
+.empty-sync-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #818cf8;
+  color: #09090b;
+  border: none;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 8px 18px;
+  border-radius: 8px;
+  transition: background .15s;
+}
+.empty-sync-btn:hover { background: #a5b4fc; }
+
+/* ═══════════════════════════════════════════════════════
+   DELTA BADGES
+═══════════════════════════════════════════════════════ */
+.pool-delta-tag {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+.pool-delta-tag.down {
+  background: rgba(248, 113, 113, .12);
+  color: #f87171;
+  border: 1px solid rgba(248, 113, 113, .25);
+}
+.pool-delta-tag.up {
+  background: rgba(52, 211, 153, .12);
+  color: #34d399;
+  border: 1px solid rgba(52, 211, 153, .25);
+}
+.pool-delta-tag.same {
+  background: rgba(113, 113, 122, .12);
+  color: #a1a1aa;
+  border: 1px solid rgba(113, 113, 122, .25);
+}
+
+.sync-delta-text {
+  color: #a1a1aa;
+  font-weight: 500;
+}
+
+</style>
+</head>
+<body>
+
+<!-- Floating tooltip -->
+<div class="tooltip" id="tooltip" role="tooltip" aria-hidden="true"></div>
+
+<!-- Add Account Modal -->
+<div class="modal-backdrop" id="add-modal" aria-hidden="true">
+  <div class="modal-card" role="dialog" aria-labelledby="modal-title">
+    <div class="modal-header">
+      <span class="modal-title" id="modal-title">Add Account</span>
+      <button class="modal-close" id="modal-close-btn" aria-label="Close modal">&times;</button>
+    </div>
+    <p class="modal-sub">Simulate Google OAuth login by entering account credentials.</p>
+    <form id="add-acc-form">
+      <div class="form-group">
+        <label for="acc-name-input">Display Name</label>
+        <input type="text" id="acc-name-input" placeholder="e.g. Jordan Smith" required autocomplete="off">
+      </div>
+      <div class="form-group">
+        <label for="acc-email-input">Email Address</label>
+        <input type="email" id="acc-email-input" placeholder="jordan@company.com" required autocomplete="off">
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="modal-cancel-btn" id="modal-cancel-btn">Cancel</button>
+        <button type="submit" class="modal-submit-btn">Add Account</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="app">
+
+  <!-- ═══ LEFT RAIL ═══ -->
+  <nav class="sidebar" aria-label="Main navigation">
+    <div class="sidebar-logo" title="Lune">
+      <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+        <path d="M9 1.5C9 1.5 13.5 5.5 13.5 9C13.5 12.5 9 16.5 9 16.5C9 16.5 4.5 12.5 4.5 9C4.5 5.5 9 1.5 9 1.5Z" fill="white" opacity="0.92"/>
+        <ellipse cx="9" cy="9" rx="2.8" ry="2.8" fill="#09090b" opacity="0.55"/>
+      </svg>
+    </div>
+    <div class="sidebar-nav">
+      <button class="nav-btn active" id="nav-accounts" title="Accounts" aria-label="Accounts">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="9" cy="7" r="4"/><path d="M3 21v-2a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2"/>
+          <path d="M16 3.13a4 4 0 0 1 0 7.75"/><path d="M21 21v-2a4 4 0 0 0-3-3.87"/>
+        </svg>
+      </button>
+      <button class="nav-btn" id="nav-analytics" title="Analytics" aria-label="Analytics">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+        </svg>
+      </button>
+    </div>
+    <div class="sidebar-bottom">
+      <button class="nav-btn" title="Settings" aria-label="Settings">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="3"/>
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+        </svg>
+      </button>
+      <button class="nav-btn" title="Log out" aria-label="Log out">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+          <polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>
+        </svg>
+      </button>
+      <!-- TEMP: IPC bridge test button — remove in next phase -->
+      <button id="ipc-test-btn" title="Ping main process" aria-label="Test IPC bridge">
+        &#x26A1;
+      </button>
+    </div>
+  </nav>
+
+  <!-- ═══ MIDDLE COLUMN ═══ -->
+  <div class="accounts-panel">
+    <div class="panel-header">
+      <div class="panel-header-row">
+        <span class="panel-title">Accounts</span>
+        <div style="display:flex;align-items:center;gap:6px">
+          <button class="add-btn" id="add-acc-btn" aria-label="Add account">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+            </svg>
+            Add account
+          </button>
+          <button class="refresh-btn" id="refresh-btn" aria-label="Refresh all accounts">
+            <svg class="refresh-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="23 4 23 10 17 10"/>
+              <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+            </svg>
+            Refresh all
+          </button>
+        </div>
+      </div>
+      <div class="panel-subtitle" id="sync-subtitle">Last synced just now</div>
+    </div>
+    <div class="accounts-list" id="accounts-list" role="list" aria-label="Accounts"></div>
+  </div>
+
+  <!-- ═══ RIGHT DETAIL PANEL ═══ -->
+  <div class="detail-panel">
+    <div class="panel-header" id="detail-header"></div>
+    <div class="detail-content" id="detail-content"></div>
+  </div>
+
+</div>
+
+<script>
+'use strict';
+
+/* ═══════════════════════════════════════════════════════
+   MOCK DATA — shaped to match the real API response:
+   each pool exposes a remainingFraction (0–1), and each
+   model within a pool has its own independent fraction.
+═══════════════════════════════════════════════════════ */
+const ACCOUNTS = [
+  {
+    id: 1, rank: 1,
+    name: 'Alex Johnson',  email: 'alex.johnson@gmail.com',
+    initials: 'AJ', avatarBg: '#1A4038',
+    profilePath: 'C:\\Users\\VISHESH\\AppData\\Roaming\\Antigravity IDE',
+    isReal: true,
+    plan: 'Google AI Pro', quotaPercent: 100,
+    lastSync: Date.now() - 2  * 60 * 1000,
+    pools: [
+      { name: 'Gemini Models', remainingFraction: 1.0000, resetTime: '2026-08-11T12:00:00Z', resetIn: '6d 10h',
+        models: [
+          { name: 'Gemini 2.0 Flash', tag: 'fast',        fraction: 1.0000 },
+          { name: 'Gemini 1.5 Pro',   tag: null,           fraction: 1.0000 },
+          { name: 'Gemini 2.0 Pro',   tag: 'recommended',  fraction: 1.0000 },
+        ] },
+      { name: 'Claude and GPT models', remainingFraction: 0.1886, resetTime: '2026-08-11T12:00:00Z', resetIn: '6d 10h',
+        models: [
+          { name: 'Claude 3.5 Sonnet', tag: 'recommended', fraction: 0.1886 },
+          { name: 'GPT-4o',            tag: null,          fraction: 0.1886 },
+          { name: 'Claude 3.5 Haiku',  tag: 'fast',         fraction: 0.1886 },
+        ] },
+    ],
+    stats: { promptCredits: { rem: 4820, tot: 5000 }, flowCredits: { rem: 452, tot: 500 }, maxInputTokens: 128000, nextReset: '6d 10h' },
+  },
+  {
+    id: 2, rank: 2,
+    name: 'Sarah Chen',    email: 'sarah.chen@company.io',
+    initials: 'SC', avatarBg: '#142040',
+    plan: 'Anthropic Teams', quotaPercent: 78,
+    lastSync: Date.now() - 14 * 60 * 1000,
+    pools: [
+      { name: 'Gemini Models', remainingFraction: 0.7800, resetTime: '2026-08-13T08:00:00Z', resetIn: '8d 12h',
+        models: [
+          { name: 'Gemini 2.0 Flash', tag: 'fast', fraction: 0.7800 },
+          { name: 'Gemini 1.5 Pro',   tag: null,   fraction: 0.7800 },
+        ] },
+      { name: 'Claude and GPT models', remainingFraction: 0.7420, resetTime: '2026-08-13T08:00:00Z', resetIn: '8d 12h',
+        models: [
+          { name: 'Claude 3.5 Sonnet', tag: 'recommended', fraction: 0.7420 },
+          { name: 'Claude 3.5 Haiku',  tag: 'fast',         fraction: 0.7420 },
+          { name: 'GPT-4o Mini',       tag: null,           fraction: 0.7420 },
+        ] },
+    ],
+    stats: { promptCredits: { rem: 3800, tot: 5000 }, flowCredits: { rem: 380, tot: 500 }, maxInputTokens: 200000, nextReset: '8d 12h' },
+  },
+  {
+    id: 3, rank: 3,
+    name: 'Marcus Rivera', email: 'marcus@devstudio.co',
+    initials: 'MR', avatarBg: '#3D2010',
+    plan: 'OpenAI Developer', quotaPercent: 45,
+    lastSync: Date.now() - 41 * 60 * 1000,
+    pools: [
+      { name: 'Gemini Models', remainingFraction: 0.4520, resetTime: '2026-08-08T18:00:00Z', resetIn: '3d 18h',
+        models: [
+          { name: 'Gemini 2.0 Flash', tag: 'fast', fraction: 0.4520 },
+          { name: 'Gemini 1.5 Flash', tag: null,   fraction: 0.4520 },
+        ] },
+      { name: 'Claude and GPT models', remainingFraction: 0.3690, resetTime: '2026-08-08T18:00:00Z', resetIn: '3d 18h',
+        models: [
+          { name: 'GPT-4o',      tag: 'recommended', fraction: 0.3690 },
+          { name: 'GPT-4o Mini', tag: 'fast',         fraction: 0.3690 },
+          { name: 'o1-mini',     tag: null,           fraction: 0.3690 },
+        ] },
+    ],
+    stats: { promptCredits: { rem: 2050, tot: 5000 }, flowCredits: { rem: 205, tot: 500 }, maxInputTokens: 128000, nextReset: '3d 18h' },
+  },
+  {
+    id: 4, rank: 4,
+    name: 'Emma Wilson',   email: 'emma.w@personal.me',
+    initials: 'EW', avatarBg: '#3D1212',
+    plan: 'Free Tier', quotaPercent: 15,
+    lastSync: Date.now() - 3  * 60 * 60 * 1000,
+    pools: [
+      { name: 'Gemini Models', remainingFraction: 0.1540, resetTime: '2026-08-06T02:00:00Z', resetIn: '1d 2h',
+        models: [
+          { name: 'Gemini 2.0 Flash Lite', tag: 'fast', fraction: 0.1540 },
+        ] },
+      { name: 'Claude and GPT models', remainingFraction: 0.0870, resetTime: '2026-08-06T02:00:00Z', resetIn: '1d 2h',
+        models: [
+          { name: 'Claude 3.5 Haiku', tag: 'fast', fraction: 0.0870 },
+          { name: 'GPT-4o Mini',      tag: null,   fraction: 0.0870 },
+        ] },
+    ],
+    stats: { promptCredits: { rem: 600, tot: 5000 }, flowCredits: { rem: 55, tot: 500 }, maxInputTokens: 32000, nextReset: '1d 2h' },
+  },
+];
+
+/* Stage label mapping for real account refresh progress reporting */
+const STAGE_LABELS = {
+  'auth-check':  'Checking login…',
+  'launching':   'Launching…',
+  'waiting-lsp': 'Starting LSP…',
+  'querying':    'Fetching status…',
+  'cleanup':     'Cleaning up…',
+  'done':        '',
+};
+
+/* ═══════════════════════════════════════════════════════
+   HELPERS
+═══════════════════════════════════════════════════════ */
+const AVATAR_PALETTE = ['#1A4038', '#142040', '#3D2010', '#3D1212', '#2A1B40', '#1B3D38', '#382E1B', '#143840'];
+
+function deriveInitials(name) {
+  if (!name) return '??';
+  const parts = name.trim().split(/\s+/);
+  if (parts.length >= 2) {
+    return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+  }
+  return name.trim().slice(0, 2).toUpperCase();
+}
+
+function status(pct) { return pct >= 85 ? 'healthy' : pct >= 15 ? 'warn' : 'critical'; }
+const MUTED = { healthy: '#818cf8', warn: '#fbbf24', critical: '#f87171' };
+const fmt   = n  => (n || 0).toLocaleString();
+const words = tk => Math.round((tk || 0) * 0.75).toLocaleString();
+const esc   = s  => String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+const pctOf = frac => +(frac * 100).toFixed(2);
+
+function formatResetTimeSentence(rt) {
+  if (!rt) return 'a few days';
+  try {
+    let diffMs = 0;
+    const d = new Date(rt);
+    if (!isNaN(d.getTime())) {
+      diffMs = Math.max(0, d.getTime() - Date.now());
+    } else if (typeof rt === 'string') {
+      const dMatch = rt.match(/(\d+)d/);
+      const hMatch = rt.match(/(\d+)h/);
+      if (dMatch || hMatch) {
+        const days = dMatch ? parseInt(dMatch[1], 10) : 0;
+        const hours = hMatch ? parseInt(hMatch[1], 10) : 0;
+        diffMs = (days * 86400 + hours * 3600) * 1000;
+      }
+    }
+
+    if (diffMs <= 0) return '0 days, 0 hours';
+    const diffHrs = Math.floor(diffMs / (1000 * 60 * 60));
+    const diffDays = Math.floor(diffHrs / 24);
+    const remHrs = diffHrs % 24;
+
+    const dayStr = `${diffDays} day${diffDays !== 1 ? 's' : ''}`;
+    const hrStr = `${remHrs} hour${remHrs !== 1 ? 's' : ''}`;
+    return `${dayStr}, ${hrStr}`;
+  } catch (e) {
+    return '6 days, 18 hours';
+  }
+}
+
+function compactRing(pct, st) {
+  const r = 11;
+  const circ = 2 * Math.PI * r;
+  const safePct = Math.min(100, Math.max(0, pct));
+  const arc = +(circ * safePct / 100).toFixed(2);
+  const gap = +(circ - arc).toFixed(2);
+  const col = MUTED[st];
+  return `
+    <svg class="compact-ring-svg" viewBox="0 0 28 28" width="22" height="22" aria-hidden="true" style="overflow:visible">
+      <circle cx="14" cy="14" r="${r}" fill="none" stroke="#27272a" stroke-width="3.5"/>
+      <circle cx="14" cy="14" r="${r}" fill="none"
+        stroke="${col}" stroke-width="3.5"
+        stroke-dasharray="${arc} ${gap}" stroke-linecap="round"
+        transform="rotate(-90 14 14)"/>
+    </svg>`;
+}
+
+function findPrimaryModel(poolName, models) {
+  if (!models || models.length === 0) return null;
+  if (/gemini/i.test(poolName)) {
+    return models.find(m => /2\.0 flash/i.test(m.name)) ||
+           models.find(m => /1\.5 pro/i.test(m.name)) ||
+           models.find(m => /2\.0 pro/i.test(m.name)) ||
+           models[0];
+  } else {
+    return models.find(m => /3\.5 sonnet/i.test(m.name)) ||
+           models.find(m => /sonnet/i.test(m.name)) ||
+           models.find(m => /gpt-4o/i.test(m.name)) ||
+           models[0];
+  }
+}
+
+function buildPoolFromGroup(poolName, models) {
+  if (!models || models.length === 0) {
+    return {
+      name: poolName,
+      remainingFraction: 1.0,
+      resetTime: null,
+      resetIn: 'N/A',
+      models: [],
+      hasDiscrepancy: false,
+      discrepancyDetails: null
+    };
+  }
+
+  const rep = findPrimaryModel(poolName, models) || models[0];
+  let hasFracDiscrepancy = false;
+  let hasResetDiscrepancy = false;
+
+  for (let i = 0; i < models.length; i++) {
+    if (Math.abs((models[i].fraction ?? 0) - (rep.fraction ?? 0)) > 0.0001) {
+      hasFracDiscrepancy = true;
+    }
+    if (models[i].resetTime !== rep.resetTime) {
+      hasResetDiscrepancy = true;
+    }
+  }
+
+  const hasDiscrepancy = hasFracDiscrepancy || hasResetDiscrepancy;
+  let discrepancyDetails = null;
+  if (hasDiscrepancy) {
+    discrepancyDetails = models.map(m => `${m.name}: frac=${m.fraction}, reset=${m.resetTime}`).join('; ');
+    console.warn(`[Lune] Model quota variance in ${poolName} (primary: ${rep.name}):`, discrepancyDetails);
+  }
+
+  return {
+    name: poolName,
+    remainingFraction: rep.fraction ?? 1.0,
+    resetTime: rep.resetTime || null,
+    resetIn: formatResetTime(rep.resetTime),
+    primaryModelName: rep.name,
+    fiveHourRemainingFraction: rep.fiveHourRemainingFraction ?? null,
+    fiveHourResetTime: rep.fiveHourResetTime || null,
+    fiveHourResetIn: formatResetTime(rep.fiveHourResetTime),
+    models: models,
+    hasDiscrepancy,
+    discrepancyDetails
+  };
+}
+
+function getClockTime(str) {
+  if (!str) return '';
+  const dMatch = str.match(/(\d+)d/);
+  const hMatch = str.match(/(\d+)h/);
+  const days = dMatch ? parseInt(dMatch[1], 10) : 0;
+  const hours = hMatch ? parseInt(hMatch[1], 10) : 0;
+  const target = new Date(Date.now() + (days * 86400 + hours * 3600) * 1000);
+  const month = target.toLocaleDateString('en-US', { month: 'short' });
+  const day = target.getDate();
+  const timeStr = target.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+  return `${month} ${day}, ${timeStr}`;
+}
+
+function formatResetTime(rt) {
+  if (!rt) return 'N/A';
+  try {
+    const d = new Date(rt);
+    if (isNaN(d.getTime())) return String(rt);
+    const diffMs = d.getTime() - Date.now();
+    if (diffMs <= 0) return 'Resetting...';
+    const diffHrs = Math.floor(diffMs / (1000 * 60 * 60));
+    const diffDays = Math.floor(diffHrs / 24);
+    const remHrs = diffHrs % 24;
+    if (diffDays > 0) return `${diffDays}d ${remHrs}h`;
+    return `${diffHrs}h`;
+  } catch (e) {
+    return String(rt);
+  }
+}
+
+/* Dispatcher for account refresh: real execution for Account #1, mock logic for others */
+function refreshAccountObj(acc) {
+  if (!acc) return;
+  if (acc.id === 1 || acc.isReal) {
+    refreshRealAccount(acc);
+    return;
+  }
+  mockRefreshAccountObj(acc);
+}
+
+/* Real account refresh workflow using IPC bridge (lib/antigravity.js via main process) */
+async function refreshRealAccount(acc) {
+  if (!acc) return;
+
+  if (typeof window.api === 'undefined' || typeof window.api.refreshAccount !== 'function') {
+    console.warn('[Lune] window.api.refreshAccount not available — falling back to mock refresh');
+    mockRefreshAccountObj(acc);
+    return;
+  }
+
+  const profilePath = acc.profilePath || 'C:\\Users\\VISHESH\\AppData\\Roaming\\Antigravity IDE';
+
+  acc.refreshError = null;
+  acc.refreshStatusLabel = STAGE_LABELS['auth-check'];
+  renderCards();
+  if (selectedId === acc.id) renderDetail();
+
+  const unsub = window.api.onRefreshStatus(({ accountId, stage }) => {
+    if (accountId === acc.id) {
+      acc.refreshStatusLabel = STAGE_LABELS[stage] !== undefined ? STAGE_LABELS[stage] : stage;
+      renderCards();
+      if (selectedId === acc.id) renderDetail();
+    }
+  });
+
+  try {
+    const result = await window.api.refreshAccount(profilePath, acc.id);
+    console.info('[Lune] Real refresh result for', acc.name, result);
+
+    acc.refreshStatusLabel = '';
+
+    if (!result.authenticated) {
+      acc.authenticated = false;
+      acc.refreshError = 'Not authenticated (login required)';
+    } else if (result.error) {
+      acc.authenticated = true;
+      acc.refreshError = result.error;
+    } else if (result.ok) {
+      acc.authenticated = true;
+      acc.refreshError = null;
+
+      // Preserve snapshot for pool delta computations
+      if ((acc.pools && acc.pools.length > 0) || acc.stats) {
+        acc.previousSnapshot = {
+          pools: acc.pools ? acc.pools.map(p => ({
+            name: p.name,
+            remainingFraction: p.remainingFraction,
+            resetIn: p.resetIn
+          })) : [],
+          promptCredits: acc.stats?.promptCredits ? acc.stats.promptCredits.rem : 0,
+          flowCredits: acc.stats?.flowCredits ? acc.stats.flowCredits.rem : 0,
+          capturedAt: acc.lastSync || Date.now()
+        };
+      }
+
+      acc.lastSync = Date.now();
+
+      if (result.name) {
+        acc.name = result.name;
+        acc.initials = deriveInitials(result.name);
+      }
+      if (result.email) {
+        acc.email = result.email;
+      }
+
+      acc.planName = result.planName || null;
+      acc.teamsTier = result.teamsTier || null;
+      acc.userTierName = result.userTierName || null;
+
+      acc.plan = result.userTierName || result.planName || result.teamsTier || (acc.plan || 'Google AI Pro');
+
+      acc.promptCredits = result.promptCredits || null;
+      acc.flowCredits = result.flowCredits || null;
+      acc.modelQuotas = result.modelQuotas || [];
+
+      // Extract real maxNumChatInputTokens from raw body
+      let maxTokens = 16384;
+      if (result.body || result.raw) {
+        try {
+          const parsedBody = JSON.parse(result.body || result.raw);
+          const rawTokens = parsedBody.userStatus?.planStatus?.planInfo?.maxNumChatInputTokens;
+          if (rawTokens) maxTokens = parseInt(rawTokens, 10) || 16384;
+        } catch (e) {}
+      }
+
+      // Find earliest resetTime among modelQuotas
+      let earliestReset = null;
+      let earliestResetMs = Infinity;
+      if (Array.isArray(acc.modelQuotas) && acc.modelQuotas.length > 0) {
+        acc.modelQuotas.forEach(m => {
+          if (m.resetTime) {
+            const ms = new Date(m.resetTime).getTime();
+            if (!isNaN(ms) && ms < earliestResetMs) {
+              earliestResetMs = ms;
+              earliestReset = m.resetTime;
+            }
+          }
+        });
+      }
+      const resetInFormatted = earliestReset ? formatResetTime(earliestReset) : (acc.modelQuotas[0]?.resetTime ? formatResetTime(acc.modelQuotas[0].resetTime) : 'N/A');
+
+      const promptAvail = acc.promptCredits?.available ?? 0;
+      const promptMonthly = acc.promptCredits?.monthly ?? 1;
+      const promptFrac = promptMonthly > 0 ? promptAvail / promptMonthly : 0;
+
+      const flowAvail = acc.flowCredits?.available ?? 0;
+      const flowMonthly = acc.flowCredits?.monthly ?? 1;
+      const flowFrac = flowMonthly > 0 ? flowAvail / flowMonthly : 0;
+
+      acc.hasQuotaData = true;
+
+      acc.stats = {
+        promptCredits: { rem: promptAvail, tot: promptMonthly },
+        flowCredits: { rem: flowAvail, tot: flowMonthly },
+        maxInputTokens: maxTokens,
+        nextReset: resetInFormatted
+      };
+
+      const geminiModels = [];
+      const claudeGptModels = [];
+
+      (acc.modelQuotas || []).forEach(m => {
+        const label = m.label || m.name || 'Unknown Model';
+        const item = {
+          name: label,
+          tag: m.tagTitle || (m.remainingFraction !== null && m.remainingFraction > 0.8 ? 'FAST' : null),
+          fraction: m.remainingFraction ?? 0,
+          resetTime: m.resetTime,
+          fiveHourRemainingFraction: m.fiveHourRemainingFraction ?? null,
+          fiveHourResetTime: m.fiveHourResetTime || null,
+        };
+        if (/gemini/i.test(label)) {
+          geminiModels.push(item);
+        } else if (/claude|gpt/i.test(label)) {
+          claudeGptModels.push(item);
+        } else {
+          claudeGptModels.push(item);
+        }
+      });
+
+      acc.pools = [
+        buildPoolFromGroup('Gemini Models', geminiModels),
+        buildPoolFromGroup('Claude and GPT models', claudeGptModels)
+      ];
+
+      const maxFrac = acc.pools.length > 0 ? Math.max(...acc.pools.map(p => p.remainingFraction)) : 1.0;
+      acc.quotaPercent = Math.round(maxFrac * 100);
+
+      console.info('[Lune] Model grouping summary for real account:', {
+        gemini: geminiModels.map(m => m.name),
+        claudeGpt: claudeGptModels.map(m => m.name),
+        pools: acc.pools
+      });
+    }
+  } catch (err) {
+    console.error('[Lune] Real refresh call threw exception:', err);
+    acc.refreshStatusLabel = '';
+    acc.refreshError = err.message || 'Refresh failed';
+  } finally {
+    unsub();
+    renderCards();
+    if (selectedId === acc.id) renderDetail();
+  }
+}
+
+/* Mock refresh helper for secondary accounts — nudges numbers and records previousSnapshot for diffing */
+function mockRefreshAccountObj(acc) {
+  if (!acc) return;
+  // If account has existing pools & stats, snapshot them before updating
+  if (acc.pools && acc.pools.length > 0 && acc.stats) {
+    acc.previousSnapshot = {
+      pools: acc.pools.map(p => ({
+        name: p.name,
+        remainingFraction: p.remainingFraction,
+        resetIn: p.resetIn
+      })),
+      promptCredits: acc.stats.promptCredits ? acc.stats.promptCredits.rem : 0,
+      flowCredits: acc.stats.flowCredits ? acc.stats.flowCredits.rem : 0,
+      capturedAt: acc.lastSync || Date.now()
+    };
+  }
+
+  // If brand-new unlinked account being synced for first time:
+  if (!acc.pools || acc.pools.length === 0) {
+    acc.plan = 'Google AI Pro';
+    acc.pools = [
+      { name: 'Gemini Models', remainingFraction: 0.9500, resetTime: '2026-08-11T12:00:00Z', resetIn: '14d 6h',
+        models: [
+          { name: 'Gemini 2.0 Flash', tag: 'fast', fraction: 0.9650 },
+          { name: 'Gemini 1.5 Pro', tag: null, fraction: 0.9350 },
+          { name: 'Gemini 2.0 Pro', tag: 'recommended', fraction: 0.9500 },
+        ] },
+      { name: 'Claude and GPT models', remainingFraction: 0.9000, resetTime: '2026-08-11T12:00:00Z', resetIn: '14d 6h',
+        models: [
+          { name: 'Claude 3.5 Sonnet', tag: 'recommended', fraction: 0.9150 },
+          { name: 'GPT-4o', tag: null, fraction: 0.8850 },
+          { name: 'Claude 3 Opus', tag: null, fraction: 0.8750 },
+        ] },
+    ];
+    acc.stats = {
+      promptCredits: { rem: 4750, tot: 5000 },
+      flowCredits: { rem: 450, tot: 500 },
+      maxInputTokens: 128000,
+      nextReset: '14d 6h'
+    };
+    acc.quotaPercent = 95;
+    acc.lastSync = Date.now();
+    return;
+  }
+
+  // Update existing pool & stat values with small realistic deltas
+  const isReset = Math.random() < 0.25; // 25% chance of quota reset to test new cycle logic
+
+  acc.pools.forEach(p => {
+    if (isReset) {
+      // Advance resetIn to simulate a new cycle starting
+      const resetCycle = ['14d 6h', '14d 12h', '15d 0h', '14d 18h'];
+      const nextIdx = (resetCycle.indexOf(p.resetIn) + 1) % resetCycle.length;
+      p.resetIn = resetCycle[nextIdx === -1 ? 0 : nextIdx];
+      p.remainingFraction = 1.0000;
+      p.models.forEach(m => m.fraction = 1.0000);
+    } else {
+      // Normal usage case: keep resetIn SAME as before, decrease fraction
+      const drop = +(Math.random() * 0.035 + 0.005).toFixed(4); // 0.5% to 4.0% drop
+      p.remainingFraction = Math.max(0.0100, +(p.remainingFraction - drop).toFixed(4));
+      p.models.forEach(m => {
+        m.fraction = Math.max(0.0100, +(m.fraction - drop * (0.8 + Math.random() * 0.4)).toFixed(4));
+      });
+    }
+  });
+
+  if (isReset) {
+    acc.stats.nextReset = acc.pools[0].resetIn;
+    acc.stats.promptCredits.rem = acc.stats.promptCredits.tot;
+    acc.stats.flowCredits.rem = acc.stats.flowCredits.tot;
+  } else {
+    const promptDrop = Math.floor(Math.random() * 180 + 20);
+    const flowDrop = Math.floor(Math.random() * 20 + 2);
+    acc.stats.promptCredits.rem = Math.max(0, acc.stats.promptCredits.rem - promptDrop);
+    acc.stats.flowCredits.rem = Math.max(0, acc.stats.flowCredits.rem - flowDrop);
+  }
+
+  const maxFrac = Math.max(...acc.pools.map(p => p.remainingFraction));
+  acc.quotaPercent = Math.round(maxFrac * 100);
+  acc.lastSync = Date.now();
+}
+
+function getPoolDeltaInfo(acc, pool) {
+  if (!acc.previousSnapshot || !acc.previousSnapshot.pools) return null;
+  const prevP = acc.previousSnapshot.pools.find(x => x.name === pool.name);
+  if (!prevP) return null;
+
+  // Key off resetTime (resetIn) equality first
+  if (pool.resetIn !== prevP.resetIn) {
+    return { text: '▲ Quota reset — new cycle', cls: 'up' };
+  }
+
+  // Same cycle: compare remainingFraction
+  const deltaFrac = pool.remainingFraction - prevP.remainingFraction;
+  const deltaPct = Math.abs(deltaFrac * 100);
+
+  if (deltaFrac < -0.001) {
+    return { text: `▼ ${deltaPct.toFixed(1)}% used`, cls: 'down' };
+  } else {
+    return { text: 'No change since last sync', cls: 'same' };
+  }
+}
+
+function getSyncDeltaSummary(acc) {
+  if (!acc.previousSnapshot) return '';
+  const prevPrompts = acc.previousSnapshot.promptCredits;
+  const currPrompts = acc.stats ? acc.stats.promptCredits.rem : 0;
+  const usedPrompts = prevPrompts - currPrompts;
+
+  if (usedPrompts > 0) {
+    return `used ${fmt(usedPrompts)} prompt credits since then`;
+  } else if (usedPrompts < 0) {
+    return `Quota reset — new cycle`;
+  } else {
+    return `No change since last sync`;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════
+   SVG RING
+═══════════════════════════════════════════════════════ */
+function ring(pct, st) {
+  const r    = 37;
+  const circ = 2 * Math.PI * r;
+  const arc  = +(circ * pct / 100).toFixed(3);
+  const gap  = +(circ - arc).toFixed(3);
+  const col  = MUTED[st];
+  const uid  = 'f' + Math.random().toString(36).slice(2, 8);
+  return `
+    <svg viewBox="0 0 100 100" width="90" height="90" style="overflow:visible" aria-hidden="true">
+      <defs>
+        <filter id="${uid}" x="-50%" y="-50%" width="200%" height="200%">
+          <feGaussianBlur in="SourceGraphic" stdDeviation="2.5" result="b"/>
+          <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+        </filter>
+      </defs>
+      <circle cx="50" cy="50" r="${r}" fill="none" stroke="#27272a" stroke-width="9"/>
+      <circle cx="50" cy="50" r="${r}" fill="none"
+        stroke="${col}" stroke-width="8"
+        stroke-dasharray="${arc} ${gap}" stroke-linecap="round"
+        transform="rotate(-90, 50, 50)" filter="url(#${uid})"/>
+    </svg>
+    <div class="ring-label">
+      <span class="ring-pct" style="color:${col}">${pct}%</span>
+      <span class="ring-sublabel">left</span>
+    </div>`;
+}
+
+/* ═══════════════════════════════════════════════════════
+   STATE
+═══════════════════════════════════════════════════════ */
+let selectedId = ACCOUNTS[0].id;
+let lastSync   = Date.now();
+
+/* ═══════════════════════════════════════════════════════
+   RENDER — ACCOUNT CARDS
+═══════════════════════════════════════════════════════ */
+function renderCards() {
+  const list = document.getElementById('accounts-list');
+  if (ACCOUNTS.length === 0) {
+    list.innerHTML = `<div style="padding: 30px 14px; text-align: center; color: #71717a; font-size: 12px; line-height: 1.5;">No accounts registered.<br>Click <strong style="color:#818cf8">Add account</strong> above to add one.</div>`;
+    return;
+  }
+
+  list.innerHTML = ACCOUNTS.map(acc => {
+    const isUnsynced = acc.quotaPercent === null || acc.quotaPercent === undefined;
+    const st  = isUnsynced ? '' : status(acc.quotaPercent);
+    const sel = acc.id === selectedId;
+    const cls = 'account-card' +
+      (sel ? ' selected' + (st === 'warn' ? ' status-warn' : st === 'critical' ? ' status-crit' : '') : '');
+    return `
+      <div class="${cls}" data-id="${acc.id}" id="card-${acc.id}" role="listitem" tabindex="0" aria-selected="${sel}">
+        <div class="card-top-row">
+          <span class="card-rank">${acc.rank}</span>
+          <div class="avatar" style="background:${acc.avatarBg}">${acc.initials}</div>
+          <div class="card-info">
+            <div class="card-name">${esc(acc.name)}</div>
+            <div class="card-email">${esc(acc.email)}</div>
+          </div>
+          <div class="card-actions">
+            <button class="launch-btn" data-lid="${acc.id}" aria-label="Launch ${esc(acc.name)}">
+              Launch
+              <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+                <line x1="7" y1="17" x2="17" y2="7"/><polyline points="7 7 17 7 17 17"/>
+              </svg>
+            </button>
+            <button class="remove-btn" data-rid="${acc.id}" title="Remove account" aria-label="Remove ${esc(acc.name)}">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="3 6 5 6 21 6"/>
+                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+        <div class="card-quota-row">
+          ${acc.refreshStatusLabel ? `
+            <span class="refresh-status-label" style="font-family:'JetBrains Mono',monospace; font-size:10.5px; color:#818cf8; font-weight:500; display:flex; align-items:center; gap:6px;">
+              <span class="spinning-dot" style="display:inline-block; width:6px; height:6px; border-radius:50%; background:#818cf8;"></span>
+              ${esc(acc.refreshStatusLabel)}
+            </span>
+          ` : acc.authenticated === false ? `
+            <span class="auth-false-label" style="font-family:'JetBrains Mono',monospace; font-size:10.5px; color:#fbbf24; font-weight:500;">
+              Not authenticated (login required)
+            </span>
+          ` : acc.refreshError ? `
+            <span class="refresh-error-label" style="font-family:'JetBrains Mono',monospace; font-size:10.5px; color:#f87171; font-weight:500;" title="${esc(acc.refreshError)}">
+              Error: ${esc(acc.refreshError)}
+            </span>
+          ` : !isUnsynced ? `
+            <div class="quota-bar-wrap"><div class="quota-bar-fill ${st}" style="width:${acc.quotaPercent}%"></div></div>
+            <span class="quota-pct">${acc.quotaPercent}%</span>
+          ` : acc.lastSync ? `
+            <span class="unsynced-label" style="color:#a1a1aa; font-style:normal;">Quota data not available</span>
+          ` : `
+            <span class="unsynced-label">Not synced yet</span>
+          `}
+        </div>
+      </div>`;
+  }).join('');
+
+  list.querySelectorAll('.account-card').forEach(card => {
+    card.addEventListener('click', () => pick(+card.dataset.id));
+    card.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(+card.dataset.id); } });
+  });
+  list.querySelectorAll('.launch-btn').forEach(btn => {
+    btn.addEventListener('click', async e => {
+      e.stopPropagation();
+      const a = ACCOUNTS.find(x => x.id === +btn.dataset.lid);
+      const profilePath = a?.profilePath || 'C:\\Users\\VISHESH\\AppData\\Roaming\\Antigravity IDE';
+      console.info('[Lune] Launching visible window for:', a?.name, profilePath);
+      if (typeof window.api?.launchAccount === 'function') {
+        const res = await window.api.launchAccount(profilePath);
+        if (!res.ok) alert('Failed to launch Antigravity: ' + res.error);
+      }
+    });
+  });
+  list.querySelectorAll('.remove-btn').forEach(btn => {
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      removeAccount(+btn.dataset.rid);
+    });
+  });
+}
+
+function removeAccount(id) {
+  const index = ACCOUNTS.findIndex(a => a.id === id);
+  if (index === -1) return;
+
+  ACCOUNTS.splice(index, 1);
+  ACCOUNTS.forEach((a, i) => { a.rank = i + 1; });
+
+  if (selectedId === id) {
+    if (ACCOUNTS.length > 0) {
+      selectedId = ACCOUNTS[Math.min(index, ACCOUNTS.length - 1)].id;
+    } else {
+      selectedId = null;
+    }
+  }
+
+  renderCards();
+  renderDetail();
+}
+
+function pick(id) { selectedId = id; renderCards(); renderDetail(); }
+
+/* ═══════════════════════════════════════════════════════
+   RENDER — DETAIL PANEL
+═══════════════════════════════════════════════════════ */
+const TIPS = {
+  promptCredits:  'Consumed each time you send a message or request a completion from the model.',
+  flowCredits:    'Used up when the agent takes autonomous actions for you — like editing files or running commands.',
+  maxInputTokens: 'The maximum amount of text (your message + code context) the model can receive in one request.',
+  nextReset:      'The two pools reset independently — this shows whichever comes first.',
+};
+
+function renderDetail() {
+  const acc = ACCOUNTS.find(a => a.id === selectedId);
+  if (!acc) {
+    document.getElementById('detail-header').innerHTML = `
+      <div class="detail-name-wrap">
+        <div class="detail-name">No Accounts</div>
+        <div class="detail-email">Add an account to get started</div>
+      </div>`;
+    document.getElementById('detail-content').innerHTML = `
+      <div class="empty-state">
+        <div class="empty-icon">
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#71717a" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10"/>
+            <line x1="12" y1="8" x2="12" y2="12"/>
+            <line x1="12" y1="16" x2="12.01" y2="16"/>
+          </svg>
+        </div>
+        <div class="empty-title">No accounts registered</div>
+        <div class="empty-sub">Click 'Add account' in the accounts panel to register an IDE profile and track its quotas.</div>
+      </div>`;
+    return;
+  }
+  const isUnsynced = !acc.stats || !acc.pools || acc.pools.length === 0;
+  const st  = isUnsynced ? 'healthy' : status(acc.quotaPercent);
+
+  const tierPill = acc.userTierName || acc.plan || 'Google AI Pro';
+  const planPill = (acc.planName || acc.teamsTier) ? [acc.planName, acc.teamsTier].filter(Boolean).join(' · ') : null;
+
+  /* Header */
+  document.getElementById('detail-header').innerHTML = `
+    <div class="detail-avatar" style="background:${acc.avatarBg}">${acc.initials}</div>
+    <div class="detail-name-wrap">
+      <div class="detail-name">${esc(acc.name)}</div>
+      <div class="detail-email">${esc(acc.email)}</div>
+    </div>
+    <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+      <span class="plan-badge ${st}">${esc(tierPill)}</span>
+      ${planPill ? `<span class="plan-badge secondary" style="background:#27272a; color:#a1a1aa; border:1px solid #363B4E;">${esc(planPill)}</span>` : ''}
+    </div>
+    <button class="launch-main-btn" id="launch-main" aria-label="Launch Antigravity for ${esc(acc.name)}">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+        <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+        <polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>
+      </svg>
+      Launch Antigravity
+    </button>`;
+  document.getElementById('launch-main').addEventListener('click', async () => {
+    const profilePath = acc.profilePath || 'C:\\Users\\VISHESH\\AppData\\Roaming\\Antigravity IDE';
+    console.info('[Lune] Main launch →', acc.name, profilePath);
+    if (typeof window.api?.launchAccount === 'function') {
+      const res = await window.api.launchAccount(profilePath);
+      if (!res.ok) alert('Failed to launch Antigravity: ' + res.error);
+    }
+  });
+
+  /* Content */
+  if (isUnsynced) {
+    const isRefreshed = !!acc.lastSync && acc.authenticated !== false && !acc.refreshError;
+    const titleText = isRefreshed ? 'Quota Data Not Available' : 'Not synced yet';
+    const subText = isRefreshed
+      ? 'GetUserStatus API returned real account identity & plan info, but no quota or usage statistics fields.'
+      : 'Refresh this account to load quota data and active model pools.';
+
+    document.getElementById('detail-content').innerHTML = `
+      <div class="empty-state">
+        <div class="empty-icon">
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#71717a" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10"/>
+            <line x1="12" y1="8" x2="12" y2="12"/>
+            <line x1="12" y1="16" x2="12.01" y2="16"/>
+          </svg>
+        </div>
+        <div class="empty-title">${esc(titleText)}</div>
+        <div class="empty-sub">${esc(subText)}</div>
+        <button class="empty-sync-btn" id="empty-sync-btn">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="23 4 23 10 17 10"/>
+            <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+          </svg>
+          Sync / Refresh Account
+        </button>
+      </div>`;
+
+    document.getElementById('empty-sync-btn')?.addEventListener('click', () => {
+      refreshAccountObj(acc);
+      renderDetail();
+      renderCards();
+    });
+    return;
+  }
+
+  const s  = acc.stats;
+  const ps = (s && s.promptCredits && s.promptCredits.tot && s.promptCredits.rem !== null) ? status((s.promptCredits.rem / s.promptCredits.tot) * 100) : 'healthy';
+  const fs = (s && s.flowCredits && s.flowCredits.tot && s.flowCredits.rem !== null) ? status((s.flowCredits.rem / s.flowCredits.tot) * 100) : 'healthy';
+  const syncSummary = getSyncDeltaSummary(acc);
+
+  document.getElementById('detail-content').innerHTML = `
+    <div class="section-title">Quota Pools</div>
+    <div class="pools-grid" id="pools-grid-${acc.id}">
+      ${acc.pools.map((p, pi) => {
+        const pct = Math.round((p.remainingFraction ?? 0) * 100);
+        const pst = status(pct);
+        const col = MUTED[pst];
+        const deltaInfo = getPoolDeltaInfo(acc, p);
+        const resetSentence = formatResetTimeSentence(p.resetTime || p.resetIn);
+        return `
+        <div class="pool-column" id="pool-col-${acc.id}-${pi}">
+          <div class="pool-card" id="pool-card-${acc.id}-${pi}">
+            <div class="pool-card-header">
+              <div class="pool-card-title-row">
+                <span class="pool-card-title">${esc(p.name)}</span>
+                <svg class="pool-info-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" title="Weekly limit for ${esc(p.name)}">
+                  <circle cx="12" cy="12" r="10"/>
+                  <line x1="12" y1="16" x2="12" y2="12"/>
+                  <line x1="12" y1="8" x2="12.01" y2="8"/>
+                </svg>
+              </div>
+              <div class="pool-card-subtitle">Weekly Limit</div>
+            </div>
+
+            <div class="pool-card-desc">
+              You have used some of your weekly limit, it will fully refresh in ${esc(resetSentence)}.
+            </div>
+
+            <div class="pool-card-body">
+              <div class="pool-pct-row">
+                <span class="pool-pct-num" style="color:${col}">${pct}%</span>
+                ${compactRing(pct, pst)}
+              </div>
+            </div>
+
+            <div class="pool-card-footer">
+              <svg class="pool-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="6 9 12 15 18 9"/></svg>
+              <span class="pool-details-label">details</span>
+            </div>
+          </div>
+          <div class="pool-stats-panel">
+            <div class="pool-unit-breakdown">
+              <div class="pool-unit-header">
+                <div class="pool-unit-main">
+                  <span class="pool-unit-num" style="color:${col}">${pct}%</span>
+                  <span class="pool-unit-fraction">(remainingFraction: ${(p.remainingFraction ?? 0).toFixed(4)})</span>
+                </div>
+                ${deltaInfo ? `<span class="pool-delta-tag ${deltaInfo.cls}">${deltaInfo.text}</span>` : ''}
+              </div>
+              <div class="pool-bar-wrap">
+                <div class="pool-bar-fill ${pst}" style="width:${pct}%"></div>
+              </div>
+              <div class="model-breakdown">
+                ${p.models.map(m => {
+                  const mpct = Math.round((m.fraction ?? 0) * 100);
+                  const mst  = status(mpct);
+                  return `
+                  <div class="model-row">
+                    <span class="model-row-name">${esc(m.name)}</span>
+                    ${m.tag ? `<span class="model-tag${m.tag === 'fast' ? ' fast' : ''}">${esc(m.tag)}</span>` : ''}
+                    <span class="model-row-frac" style="color:${MUTED[mst]}">${mpct}%</span>
+                  </div>`;
+                }).join('')}
+              </div>
+            </div>
+          </div>
+        </div>`;
+      }).join('')}
+    </div>
+
+    <div class="section-title">Usage Stats</div>
+    <div class="stat-grid">
+      <div class="stat-card">
+        <span class="stat-label has-tooltip" data-tip="promptCredits">Prompt credits</span>
+        <span class="stat-value" style="color:${MUTED[ps]}">${s && s.promptCredits && s.promptCredits.rem !== null ? fmt(s.promptCredits.rem) : 'N/A'}</span>
+        <div class="stat-sub">${s && s.promptCredits && s.promptCredits.tot !== null ? `of ${fmt(s.promptCredits.tot)} total` : 'Not available'}</div>
+      </div>
+      <div class="stat-card">
+        <span class="stat-label has-tooltip" data-tip="flowCredits">Flow credits</span>
+        <span class="stat-value" style="color:${MUTED[fs]}">${s && s.flowCredits && s.flowCredits.rem !== null ? fmt(s.flowCredits.rem) : 'N/A'}</span>
+        <div class="stat-sub">${s && s.flowCredits && s.flowCredits.tot !== null ? `of ${fmt(s.flowCredits.tot)} total` : 'Not available'}</div>
+      </div>
+      <div class="stat-card">
+        <span class="stat-label has-tooltip" data-tip="maxInputTokens">Max input tokens</span>
+        <span class="stat-value" style="font-size:15px;line-height:1.2">${s && s.maxInputTokens !== null ? fmt(s.maxInputTokens) : 'N/A'}</span>
+        <div class="stat-sub">≈ ${s && s.maxInputTokens !== null ? words(s.maxInputTokens) : '0'} words</div>
+      </div>
+      <div class="stat-card">
+        <span class="stat-label has-tooltip" data-tip="nextReset">Next reset</span>
+        <span class="stat-value" style="font-size:12px;line-height:1.35">${s && s.nextReset ? esc(s.nextReset) : 'N/A'}</span>
+        <div class="stat-sub">model reset time</div>
+      </div>
+    </div>
+
+    <div class="sync-row">
+      <div class="pulse-dot ${st}" aria-hidden="true"></div>
+      <span class="sync-text">
+        Last synced <span class="sync-time" id="det-sync">${timeSince(acc.lastSync)}</span>
+        ${syncSummary ? ` · <span class="sync-delta-text">${syncSummary}</span>` : ''}
+      </span>
+      <button class="refresh-acc-btn" id="refresh-acc-btn" aria-label="Refresh this account">
+        <svg class="refresh-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="23 4 23 10 17 10"/>
+          <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+        </svg>
+        Refresh this account
+      </button>
+    </div>`;
+
+  document.getElementById('refresh-acc-btn').addEventListener('click', e => {
+    const btn = e.currentTarget;
+    btn.classList.remove('spinning'); void btn.offsetWidth; btn.classList.add('spinning');
+    refreshAccountObj(acc);
+    console.info('[Lune] Refresh this account →', acc.name, acc.email);
+    setTimeout(() => { renderDetail(); renderCards(); }, 550);
+  });
+
+  document.getElementById('detail-content').querySelectorAll('[data-tip]').forEach(el => {
+    el.addEventListener('mouseenter', showTip);
+    el.addEventListener('mousemove',  moveTip);
+    el.addEventListener('mouseleave', hideTip);
+  });
+
+  /* Pool card expand/collapse — height driven by real content (scrollHeight),
+     not a guessed fixed max-height, since the model list length varies per pool */
+  document.getElementById('detail-content').querySelectorAll('.pool-column').forEach(col => {
+    const card  = col.querySelector('.pool-card');
+    const panel = col.querySelector('.pool-stats-panel');
+    if (card && panel) {
+      card.addEventListener('click', () => {
+        const isExpanded = col.classList.contains('expanded');
+        if (isExpanded) {
+          panel.style.maxHeight = '0px';
+          col.classList.remove('expanded');
+        } else {
+          col.classList.add('expanded');
+          panel.style.maxHeight = panel.scrollHeight + 'px';
+        }
+      });
+    }
+  });
+}
+
+/* ═══════════════════════════════════════════════════════
+   TOOLTIP
+═══════════════════════════════════════════════════════ */
+const tipEl = document.getElementById('tooltip');
+function showTip(e) { tipEl.textContent = TIPS[e.currentTarget.dataset.tip] || ''; tipEl.classList.add('visible'); moveTip(e); }
+function hideTip()  { tipEl.classList.remove('visible'); }
+function moveTip(e) {
+  const tw = tipEl.offsetWidth, th = tipEl.offsetHeight, pad = 14;
+  let x = e.clientX - tw / 2, y = e.clientY - th - pad;
+  x = Math.max(6, Math.min(x, innerWidth  - tw - 6));
+  y = y < 6 ? e.clientY + pad : y;
+  tipEl.style.left = x + 'px'; tipEl.style.top = y + 'px';
+}
+
+/* ═══════════════════════════════════════════════════════
+   SYNC CLOCK
+═══════════════════════════════════════════════════════ */
+function timeSince(ts) {
+  const from = ts === undefined ? lastSync : ts;
+  const s = Math.round((Date.now() - from) / 1000);
+  if (s < 5)    return 'just now';
+  if (s < 60)   return s + 's ago';
+  if (s < 3600) return Math.floor(s / 60) + 'm ago';
+  return Math.floor(s / 3600) + 'h ago';
+}
+function tickSync() {
+  const sub = document.getElementById('sync-subtitle');
+  const det = document.getElementById('det-sync');
+  if (sub) sub.textContent = 'Last synced ' + timeSince(lastSync);
+  const acc = ACCOUNTS.find(a => a.id === selectedId);
+  if (det && acc) det.textContent = timeSince(acc.lastSync);
+}
+setInterval(tickSync, 5000);
+
+document.getElementById('refresh-btn').addEventListener('click', () => {
+  const now = Date.now();
+  lastSync = now;
+  ACCOUNTS.forEach(a => refreshAccountObj(a));
+  const btn = document.getElementById('refresh-btn');
+  btn.classList.remove('spinning');
+  void btn.offsetWidth;
+  btn.classList.add('spinning');
+  setTimeout(() => {
+    btn.classList.remove('spinning');
+    renderCards();
+    renderDetail();
+  }, 600);
+});
+
+/* Modal event bindings */
+const addModal = document.getElementById('add-modal');
+const addForm  = document.getElementById('add-acc-form');
+
+function openAddModal() {
+  addForm.reset();
+  addModal.classList.add('open');
+  document.getElementById('acc-name-input').focus();
+}
+function closeAddModal() {
+  addModal.classList.remove('open');
+}
+
+document.getElementById('add-acc-btn').addEventListener('click', openAddModal);
+document.getElementById('modal-close-btn').addEventListener('click', closeAddModal);
+document.getElementById('modal-cancel-btn').addEventListener('click', closeAddModal);
+addModal.addEventListener('click', e => { if (e.target === addModal) closeAddModal(); });
+window.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && addModal.classList.contains('open')) closeAddModal();
+});
+
+addForm.addEventListener('submit', e => {
+  e.preventDefault();
+  const name  = document.getElementById('acc-name-input').value.trim();
+  const email = document.getElementById('acc-email-input').value.trim();
+  if (!name || !email) return;
+
+  const newAccount = {
+    id: Date.now(),
+    rank: ACCOUNTS.length + 1,
+    name: name,
+    email: email,
+    initials: deriveInitials(name),
+    avatarBg: AVATAR_PALETTE[ACCOUNTS.length % AVATAR_PALETTE.length],
+    plan: 'Unlinked',
+    quotaPercent: null,
+    lastSync: null,
+    pools: [],
+    stats: null,
+    previousSnapshot: null
+  };
+
+  ACCOUNTS.push(newAccount);
+  selectedId = newAccount.id;
+  closeAddModal();
+  renderCards();
+  renderDetail();
+});
+
+/* ═══════════════════════════════════════════════════════
+   INIT
+═══════════════════════════════════════════════════════ */
+renderCards();
+renderDetail();
+
+/* ═══════════════════════════════════════════════════════
+   TEMP: IPC BRIDGE TEST — remove/replace in next phase
+   Calls window.electronAPI.ping() (exposed by preload.js)
+   and shows the result so we can confirm the bridge works.
+═══════════════════════════════════════════════════════ */
+(function wirePingButton() {
+  const btn = document.getElementById('ipc-test-btn');
+  if (!btn) return;
+  btn.addEventListener('click', async () => {
+    if (typeof window.electronAPI === 'undefined') {
+      alert('window.electronAPI not found — are you running inside Electron?');
+      return;
+    }
+    try {
+      const result = await window.electronAPI.ping();
+      console.log('[IPC bridge test] ping result:', result);
+      alert('IPC bridge ✓\n\n' + result);
+    } catch (err) {
+      console.error('[IPC bridge test] ping failed:', err);
+      alert('IPC bridge ✗\n\n' + err.message);
+    }
+  });
+}());
+</script>
+</body>
+</html>
