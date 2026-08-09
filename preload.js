@@ -56,4 +56,80 @@ contextBridge.exposeInMainWorld('api', {
    */
   launchAccount: (profilePath) =>
     ipcRenderer.invoke('launch-account', { profilePath }),
+
+  /**
+   * Load persisted accounts array from disk (userData/accounts.json).
+   * @returns {Promise<Array>}
+   */
+  loadAccounts: () => ipcRenderer.invoke('load-accounts'),
+
+  /**
+   * Save accounts array to disk (userData/accounts.json).
+   * @param {Array} accounts
+   * @returns {Promise<{ ok: boolean, error?: string }>}
+   */
+  saveAccounts: (accounts) => ipcRenderer.invoke('save-accounts', accounts),
+
+  /**
+   * Scan system for running Antigravity IDE Language Server processes and return candidate accounts.
+   */
+  detectRunningAccounts: () => ipcRenderer.invoke('detect-running-accounts'),
+
+  /**
+   * Save an imported candidate account to accounts.json.
+   */
+  saveImportedAccount: (accountObj) => ipcRenderer.invoke('save-imported-account', accountObj),
+
+  /**
+   * Bulk refresh all accounts.
+   */
+  refreshAllAccounts: () => ipcRenderer.invoke('refresh-all-accounts'),
+
+  /**
+   * Remove an account by ID.
+   */
+  removeAccount: (accountId) => ipcRenderer.invoke('remove-account', { accountId }),
+
+  /**
+   * Subscribe to live background watcher status updates for running accounts.
+   */
+  onLiveAccountUpdate: (callback) => {
+    const handler = (_, payload) => callback(payload);
+    ipcRenderer.on('live-account-update', handler);
+    return () => ipcRenderer.removeListener('live-account-update', handler);
+  },
+
+  /**
+   * Subscribe to per-card refresh status during Refresh All.
+   * Callback receives { accountId, status: 'start'|'done' }
+   */
+  onRefreshAllCardStatus: (callback) => {
+    const handler = (_, payload) => callback(payload);
+    ipcRenderer.on('refresh-all-card-status', handler);
+    return () => ipcRenderer.removeListener('refresh-all-card-status', handler);
+  },
+
+  /**
+   * Subscribe to live online/offline status changes for accounts.
+   * Emitted by the live watcher when a matched running process appears or disappears.
+   * Callback receives { accountId: number, isOnline: boolean }
+   * Only emitted on state CHANGE (flip), not every tick.
+   */
+  onAccountOnlineStatus: (callback) => {
+    const handler = (_, payload) => callback(payload);
+    ipcRenderer.on('account-online-status', handler);
+    return () => ipcRenderer.removeListener('account-online-status', handler);
+  },
+
+  /**
+   * Subscribe to full batch account-online-status-sync events.
+   * Emitted every scan cycle with the array of active account IDs and active emails.
+   * Callback receives { activeAccountIds: number[], activeEmails: string[] }
+   */
+  onAccountOnlineStatusSync: (callback) => {
+    const handler = (_, payload) => callback(payload);
+    ipcRenderer.on('account-online-status-sync', handler);
+    return () => ipcRenderer.removeListener('account-online-status-sync', handler);
+  },
+
 });
