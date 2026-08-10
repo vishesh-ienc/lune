@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Lune — AI Quota Dashboard</title>
+<title>Lune - Agent tracking dashboard</title>
 <meta name="description" content="Monitor AI usage quota across multiple IDE accounts in a unified local dashboard.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -1109,9 +1109,22 @@ body {
   <!-- ═══ LEFT RAIL ═══ -->
   <nav class="sidebar" aria-label="Main navigation">
     <div class="sidebar-logo" title="Lune">
-      <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
-        <path d="M9 1.5C9 1.5 13.5 5.5 13.5 9C13.5 12.5 9 16.5 9 16.5C9 16.5 4.5 12.5 4.5 9C4.5 5.5 9 1.5 9 1.5Z" fill="white" opacity="0.92"/>
-        <ellipse cx="9" cy="9" rx="2.8" ry="2.8" fill="#09090b" opacity="0.55"/>
+      <svg width="22" height="22" viewBox="0 0 64 64" fill="none">
+        <g>
+          <g>
+            <path fill="#394240" d="M60,0H4C1.789,0,0,1.789,0,4v40c0,2.211,1.789,4,4,4h24v10h-8c-2.209,0-4,1.791-4,4v1c0,0.553,0.447,1,1,1 h30c0.553,0,1-0.447,1-1v-1c0-2.209-1.791-4-4-4h-8V48h24c2.211,0,4-1.789,4-4V4C64,1.789,62.211,0,60,0z M44,60 c1.104,0,2,0.896,2,2H18c0-1.104,0.896-2,2-2H44z M34,58h-4V48h4V58z M62,44c0,1.104-0.896,2-2,2H4c-1.104,0-2-0.896-2-2v-4h60V44 z M62,38H2V4c0-1.104,0.896-2,2-2h56c1.104,0,2,0.896,2,2V38z"/>
+          </g>
+          <g>
+            <path fill="#506C7F" d="M2,40v4c0,1.104,0.896,2,2,2h56c1.104,0,2-0.896,2-2v-4H2z"/>
+            <rect x="30" y="48" fill="#506C7F" width="4" height="10"/>
+            <path fill="#506C7F" d="M44,60H20c-1.104,0-2,0.896-2,2h28C46,60.896,45.104,60,44,60z"/>
+          </g>
+          <g>
+            <path fill="#B4CCB9" d="M2,4v34h60V4c0-1.104-0.896-2-2-2H4C2.896,2,2,2.896,2,4z"/>
+          </g>
+          <circle fill="#394240" cx="32" cy="43" r="2"/>
+          <rect x="30" y="48" opacity="0.3" width="4" height="10"/>
+        </g>
       </svg>
     </div>
     <div class="sidebar-nav">
@@ -2066,9 +2079,24 @@ async function removeAccount(id) {
 
 function pick(id) { selectedId = id; renderCards(); renderDetail(); }
 
-/* ═══════════════════════════════════════════════════════
-   RENDER — DETAIL PANEL
-═══════════════════════════════════════════════════════ */
+function formatLastSynced(ts) {
+  if (!ts) return 'Not synced yet';
+  const now = Date.now();
+  const diffMs = Math.max(0, now - ts);
+  const diffMins = Math.floor(diffMs / 60000);
+
+  if (diffMins < 15) {
+    if (diffMins < 1) return 'Last synced just now';
+    if (diffMins === 1) return 'Last synced 1 minute ago';
+    return `Last synced ${diffMins} minutes ago`;
+  }
+
+  const d = new Date(ts);
+  const timeStr = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true });
+  const dateStr = d.toLocaleDateString([], { day: 'numeric', month: 'long', year: 'numeric' });
+  return `Last synced: ${timeStr}, ${dateStr}`;
+}
+
 const TIPS = {
   promptCredits:  'Consumed each time you send a message or request a completion from the model.',
   flowCredits:    'Used up when the agent takes autonomous actions for you — like editing files or running commands.',
@@ -2109,6 +2137,10 @@ function startCountdownTicker() {
         }
 
         if (acc.id === selectedId) {
+          const syncValEl = document.getElementById(`det-sync-val-${acc.id}`);
+          if (syncValEl) {
+            syncValEl.textContent = formatLastSynced(acc.lastSyncedAt || acc.lastSync);
+          }
           const descEl = document.getElementById(`pool-desc-${acc.id}-${pi}`);
           const pctEl = document.getElementById(`pool-pct-num-${acc.id}-${pi}`);
           const ringEl = document.getElementById(`pool-ring-${acc.id}-${pi}`);
@@ -2302,7 +2334,7 @@ function renderDetail() {
     <div class="sync-row">
       <div class="pulse-dot ${st}" aria-hidden="true"></div>
       <span class="sync-text" id="sync-text-wrap-${acc.id}">
-        ${acc.lastSyncSource === 'auto' ? 'Last auto-synced' : 'Last synced'} <span class="sync-time" id="det-sync">${timeSince(acc.lastSync)}</span>
+        <span class="sync-time" id="det-sync-val-${acc.id}">${esc(formatLastSynced(acc.lastSyncedAt || acc.lastSync))}</span>
         ${acc.unreachable ? `<span class="unreachable-note" style="font-size:11px; color:#71717a; margin-left:6px; font-style:italic;">(Showing last known data — account not currently running)</span>` : ''}
       </span>
       ${onlineAccountIds.has(acc.id) ? `
@@ -2310,29 +2342,16 @@ function renderDetail() {
           <span style="display:inline-block; width:6px; height:6px; border-radius:50%; background:#4ade80; animation:livePulse 2s infinite;"></span>
           Auto-syncing
         </span>
-      ` : `
-        <button class="refresh-acc-btn" id="refresh-acc-btn" aria-label="Refresh this account">
-          <svg class="refresh-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-            <polyline points="23 4 23 10 17 10"/>
-            <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
-          </svg>
-          Refresh this account
-        </button>
-      `}
+      ` : ''}
+    </div>
+    <div class="tracking-notice" style="margin-top:10px; font-size:11.5px; color:#a1a1aa; display:flex; align-items:center; gap:6px; background:rgba(255,255,255,0.02); padding:8px 12px; border-radius:6px; border:1px solid rgba(255,255,255,0.05);">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#818cf8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;">
+        <circle cx="12" cy="12" r="10"/>
+        <line x1="12" y1="16" x2="12" y2="12"/>
+        <line x1="12" y1="8" x2="12.01" y2="8"/>
+      </svg>
+      <span>Keep Lune running while using Antigravity to keep your account data up to date.</span>
     </div>`;
-
-  const refreshAccBtn = document.getElementById('refresh-acc-btn');
-  if (refreshAccBtn) {
-    refreshAccBtn.addEventListener('click', async e => {
-      const btn = e.currentTarget;
-      btn.classList.remove('spinning'); void btn.offsetWidth; btn.classList.add('spinning');
-      if (typeof window.api?.refreshAllAccounts === 'function') {
-        await window.api.refreshAllAccounts();
-      }
-      console.info('[Lune] Refresh this account →', acc.name, acc.email);
-      setTimeout(() => { renderDetail(); renderCards(); }, 550);
-    });
-  }
 
   document.getElementById('detail-content').querySelectorAll('[data-tip], [data-custom-tip]').forEach(el => {
     el.addEventListener('mouseenter', showTip);
@@ -2441,13 +2460,18 @@ window.addEventListener('keydown', e => {
   if (e.key === 'Escape' && addModal && addModal.classList.contains('open')) closeAddModal();
 });
 
+let isImportScanRunning = false;
+
 async function runImportScan() {
+  if (isImportScanRunning) return;
   if (!statusDiv) return;
+
+  isImportScanRunning = true;
   statusDiv.style.display = 'block';
   statusDiv.style.background = 'rgba(129,140,248,0.08)';
   statusDiv.style.border = '1px solid rgba(129,140,248,0.25)';
   statusDiv.style.color = '#a5b4fc';
-  statusDiv.innerHTML = '<span style="display:inline-flex;align-items:center;gap:8px;"><svg class="spinning-dot" style="width:12px;height:12px;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg> Scanning for running Antigravity instance\u2026</span>';
+  statusDiv.innerHTML = '<span style="display:inline-flex;align-items:center;gap:8px;"><svg class="spinning-dot" style="width:12px;height:12px;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg> Scanning for running Antigravity instance…</span>';
 
   try {
     const res = await window.api.detectRunningAccounts();
@@ -2464,12 +2488,11 @@ async function runImportScan() {
           <div style="font-size:11.5px; color:#a1a1aa; background:rgba(255,255,255,0.03); padding:10px 12px; border-radius:6px; border:1px solid #27272a; line-height:1.5;">
             💡 <strong>To import your account:</strong> Launch Antigravity IDE, ensure you are signed in, and click <strong>Scan Again</strong> below.
           </div>
-          <button type="button" id="rescan-btn" style="background:#27272a; color:#f4f4f5; border:1px solid #3f3f46; font-weight:600; font-size:11px; padding:7px 14px; border-radius:6px; cursor:pointer; align-self:flex-start; margin-top:4px;">
+          <button type="button" id="rescan-btn" onclick="runImportScan()" style="background:#27272a; color:#f4f4f5; border:1px solid #3f3f46; font-weight:600; font-size:11px; padding:7px 14px; border-radius:6px; cursor:pointer; align-self:flex-start; margin-top:4px;">
             Scan Again
           </button>
         </div>
       `;
-      document.getElementById('rescan-btn')?.addEventListener('click', runImportScan);
       return;
     }
 
@@ -2482,11 +2505,10 @@ async function runImportScan() {
       statusDiv.style.color = '#fbbf24';
       statusDiv.innerHTML = `
         <div style="margin-bottom:10px;">All detected active accounts (${esc(alreadySaved.map(c => c.email).join(', '))}) are already saved in Lune.</div>
-        <button type="button" id="rescan-btn" style="background:#27272a; color:#f4f4f5; border:1px solid #3f3f46; font-weight:600; font-size:11px; padding:6px 12px; border-radius:6px; cursor:pointer;">
+        <button type="button" id="rescan-btn" onclick="runImportScan()" style="background:#27272a; color:#f4f4f5; border:1px solid #3f3f46; font-weight:600; font-size:11px; padding:6px 12px; border-radius:6px; cursor:pointer;">
           Scan Again
         </button>
       `;
-      document.getElementById('rescan-btn')  ?.addEventListener('click', runImportScan);
       return;
     }
 
@@ -2496,7 +2518,7 @@ async function runImportScan() {
     statusDiv.innerHTML = `
       <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:10px;">
         <span style="font-size:11px; color:#a1a1aa; font-weight:600; text-transform:uppercase; letter-spacing:0.05em;">Detected Active Account${unregistered.length > 1 ? 's' : ''}</span>
-        <button type="button" id="rescan-btn" style="background:transparent; color:#818cf8; border:none; font-size:11px; cursor:pointer; font-weight:500;">Refresh Scan</button>
+        <button type="button" id="rescan-btn" onclick="runImportScan()" style="background:transparent; color:#818cf8; border:none; font-size:11px; cursor:pointer; font-weight:500;">Refresh Scan</button>
       </div>
       ${unregistered.map((c, i) => `
         <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; padding:8px 0; border-top:1px solid #27272a;">
@@ -2512,25 +2534,27 @@ async function runImportScan() {
       `).join('')}
     `;
 
-    document.getElementById('rescan-btn')  ?.addEventListener('click', runImportScan);
-
     unregistered.forEach((c, i) => {
-      document.getElementById(`confirm-import-${i}`)  ?.addEventListener('click', async () => {
+      document.getElementById(`confirm-import-${i}`)?.addEventListener('click', async () => {
         const saveRes = await window.api.saveImportedAccount(c.accountObj);
         if (saveRes.ok && saveRes.account) {
           const existingIdx = ACCOUNTS.findIndex(a =>
             a.id === saveRes.account.id ||
             (a.email && a.email.toLowerCase() === (saveRes.account.email || '').toLowerCase())
           );
-          if (existingIdx !== -1) { ACCOUNTS[existingIdx] = saveRes.account; }
-          else { ACCOUNTS.push(saveRes.account); }
-          selectedId = saveRes.account.id;
+          if (existingIdx !== -1) {
+            ACCOUNTS[existingIdx] = saveRes.account;
+          } else {
+            ACCOUNTS.push(saveRes.account);
+          }
+          selectedAccountId = saveRes.account.id;
           closeAddModal();
           renderCards();
           renderDetail();
+
           const toast = document.createElement('div');
           toast.style.cssText = `position:fixed;bottom:24px;right:24px;z-index:9999;background:rgba(34,197,94,0.15);border:1px solid rgba(34,197,94,0.35);color:#4ade80;padding:10px 16px;border-radius:10px;font-size:13px;box-shadow:0 4px 24px rgba(0,0,0,0.4);pointer-events:none;animation:fadeIn 0.2s ease;`;
-          toast.textContent = `\u2713 Imported ${saveRes.account.email} \u2014 tracking quota automatically.`;
+          toast.textContent = `✓ Imported ${saveRes.account.email} — tracking quota automatically.`;
           document.body.appendChild(toast);
           setTimeout(() => toast.remove(), 4000);
         } else {
@@ -2544,6 +2568,8 @@ async function runImportScan() {
     statusDiv.style.border = '1px solid rgba(248,113,113,0.25)';
     statusDiv.style.color = '#f87171';
     statusDiv.innerHTML = 'Scan failed: ' + esc(err.message || 'Unknown error');
+  } finally {
+    isImportScanRunning = false;
   }
 }
 

@@ -7,7 +7,6 @@ node_modules/
 coverage/
 
 # Production / Build
-build/
 dist/
 out/
 
@@ -37,6 +36,7 @@ test-direct-lsp.js
 test-headless-refresh.js
 test-option3-hidden-desktop.js
 scripts/inspect-procs.js
+scripts/make-icon.js
 scripts/restore-backup.js
 scripts/test-backup-restore.js
 scripts/verify-lib.js

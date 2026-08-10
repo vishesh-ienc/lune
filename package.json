@@ -5,6 +5,8 @@
   "main": "main.js",
   "scripts": {
     "start": "electron .",
+    "generate-icon": "node scripts/make-icon.js",
+    "dist": "electron-builder",
     "test": "node lifecycle-test.js",
     "test:lifecycle": "node lifecycle-test.js"
   },
@@ -13,9 +15,53 @@
   "license": "ISC",
   "type": "commonjs",
   "devDependencies": {
-    "electron": "^43.2.0"
+    "@resvg/resvg-js": "^2.6.2",
+    "electron": "^43.2.0",
+    "electron-builder": "^26.15.3",
+    "png-to-ico": "^3.0.2"
   },
   "dependencies": {
     "koffi": "^3.1.4"
+  },
+  "build": {
+    "appId": "com.lune.app",
+    "productName": "Lune",
+    "directories": {
+      "output": "dist"
+    },
+    "win": {
+      "target": "nsis",
+      "icon": "build/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "index.html",
+      "lib/**/*",
+      "build/icon.ico",
+      "build/icon.png",
+      "build/icon.svg",
+      "package.json",
+      "!scripts/**/*",
+      "!test-*.js",
+      "!lifecycle-test.js",
+      "!dump-procs.js",
+      "!probe.js",
+      "!replace.js",
+      "!*.py",
+      "!hide-hook-helper.*",
+      "!PROJECT_ALL_FILES.md",
+      "!FINDINGS.md",
+      "!*.log",
+      "!accounts.json",
+      "!accounts-backups/**/*",
+      "!debug-full-response.json"
+    ]
   }
 }

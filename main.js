@@ -1,7 +1,7 @@
 'use strict';
 
-const { app, BrowserWindow, ipcMain } = require('electron');
-const { execFileSync } = require('child_process');
+const { app, BrowserWindow, ipcMain, Menu } = require('electron');
+const logger = require('./lib/logger');
 const fs   = require('fs');
 const path = require('path');
 const ag   = require('./lib/antigravity');
@@ -63,7 +63,7 @@ function loadAccountsFromDisk() {
     const raw = fs.readFileSync(filePath, 'utf8');
     const parsed = JSON.parse(raw);
     if (Array.isArray(parsed)) {
-      console.log(`[Lune main.js] Loaded ${parsed.length} persisted account(s) from ${filePath}`);
+      logger.debug(`[Lune main.js] Loaded ${parsed.length} persisted account(s) from ${filePath}`);
       // Strip transient runtime-only error flags so they never bleed across sessions.
       // These are set during a live query and must be re-evaluated fresh each run.
       for (const acc of parsed) {
@@ -97,7 +97,7 @@ function backupAccountsFileBeforeWrite(filePath) {
     const backupPath = path.join(backupDir, backupFileName);
 
     fs.copyFileSync(filePath, backupPath);
-    console.log(`[Lune backup] Created accounts backup: ${backupFileName}`);
+    logger.debug(`[Lune backup] Created accounts backup: ${backupFileName}`);
 
     const MAX_BACKUPS = 20;
     const files = fs.readdirSync(backupDir)
@@ -109,7 +109,7 @@ function backupAccountsFileBeforeWrite(filePath) {
       for (const oldFile of toDelete) {
         try {
           fs.unlinkSync(path.join(backupDir, oldFile));
-          console.log(`[Lune backup] Pruned old backup: ${oldFile}`);
+          logger.debug(`[Lune backup] Pruned old backup: ${oldFile}`);
         } catch (_) {}
       }
     }
@@ -137,7 +137,7 @@ function saveAccountsToDisk(accounts) {
     backupAccountsFileBeforeWrite(filePath);
     const data = JSON.stringify(clean, null, 2);
     fs.writeFileSync(filePath, data, 'utf8');
-    console.log(`[Lune main.js] Persisted ${clean.length} account(s) to ${filePath}`);
+    logger.debug(`[Lune main.js] Persisted ${clean.length} account(s) to ${filePath}`);
     return { ok: true };
   } catch (err) {
     console.error('[Lune main.js] Failed to save accounts.json:', err.message);
@@ -178,12 +178,12 @@ async function resolveAndDeduplicateServers(servers) {
           }
         }
       } catch (err) {
-        console.log(`[Lune resolve-servers] PID ${server.pid} port ${port}: query failed — ${err.message}`);
+        logger.debug(`[Lune resolve-servers] PID ${server.pid} port ${port}: query failed — ${err.message}`);
       }
     }
 
     if (!email) {
-      console.log(`[Lune resolve-servers] PID ${server.pid}: no email resolved — skipping.`);
+      logger.debug(`[Lune resolve-servers] PID ${server.pid}: no email resolved — skipping.`);
       continue;
     }
 
@@ -196,7 +196,7 @@ async function resolveAndDeduplicateServers(servers) {
     if (!seenEmails.has(emailLower)) {
       seenEmails.add(emailLower);
       resolvedServers.push(server);
-      console.log(`[Lune resolve-servers] PID ${server.pid}: resolved email=${email}.`);
+      logger.debug(`[Lune resolve-servers] PID ${server.pid}: resolved email=${email}.`);
     }
   }
 
@@ -227,6 +227,7 @@ function extractModelSummaries(body) {
 }
 
 function logDiagnosticComparison(usedPort, candidatePorts, body1, durationMs1, body2, durationMs2) {
+  if (!logger.isDebug()) return;
   console.log('\n' + '='.repeat(80));
   console.log('  [LUNE DIAGNOSTIC INSTRUMENTATION LOG]');
   console.log('='.repeat(80));
@@ -316,64 +317,87 @@ ipcMain.handle('save-accounts', async (event, accounts) => {
   return saveAccountsToDisk(accounts);
 });
 
+let detectScanInFlightPromise = null;
+
 /**
  * 'detect-running-accounts' — Scan for all active Language Server processes and return
  * candidate accounts along with duplicate registration status.
  */
 ipcMain.handle('detect-running-accounts', async () => {
-  const rawServers = ag.findAllActiveRunningLanguageServers() || [];
-  const servers = await resolveAndDeduplicateServers(rawServers);
-  console.log(`[Lune detect-running-accounts] Found ${servers.length} running Language Server process(es)`);
-
-  if (servers.length === 0) {
-    return { ok: false, error: 'no-running-lsp', message: 'No running Antigravity IDE process found on your PC.' };
+  if (detectScanInFlightPromise) {
+    logger.debug('[Lune detect-running-accounts] Reusing in-flight scan');
+    return detectScanInFlightPromise;
   }
 
-  const existingAccounts = getAccounts();
-  const candidates = [];
-  const seenEmails = new Set();
+  detectScanInFlightPromise = (async () => {
+    const t0 = Date.now();
+    const rawServers = (await ag.findAllActiveRunningLanguageServers()) || [];
+    const tScan = Date.now() - t0;
 
-  for (const srv of servers) {
-    const email = srv.activeEmail || null;
-    const name  = srv.lastParsedUserStatus?.name || null;
-    const body  = srv.lastRawResponseBody || null;
+    const tResolveStart = Date.now();
+    const servers = await resolveAndDeduplicateServers(rawServers);
+    const tResolve = Date.now() - tResolveStart;
+    const tTotal = Date.now() - t0;
 
-    if (!email) continue;
+    logger.debug(`[SCAN TIMING] total: ${tTotal}ms | scan: ${tScan}ms | resolve: ${tResolve}ms | main-thread blocking: 0ms`);
+    logger.debug(`[Lune detect-running-accounts] Found ${servers.length} running Language Server process(es)`);
 
-    const emailLower = email.toLowerCase().trim();
-    if (seenEmails.has(emailLower)) continue;
-    seenEmails.add(emailLower);
-
-    const isAlreadyRegistered = existingAccounts.some(a => (a.email || '').toLowerCase().trim() === emailLower);
-
-    let accountObj = null;
-    if (body) {
-      try {
-        const parsedBody = JSON.parse(body);
-        const userStatus = parsedBody.userStatus || parsedBody;
-        accountObj = buildAccountFromUserStatusHelper(userStatus, srv.userDataDir, existingAccounts.length + candidates.length);
-      } catch (e) {
-        console.warn(`[Lune detect-running-accounts] Exception building accountObj for PID ${srv.pid}:`, e.message);
-      }
+    if (servers.length === 0) {
+      return { ok: false, error: 'no-running-lsp', message: 'No running Antigravity IDE process found on your PC.' };
     }
 
-    if (!accountObj) continue;
+    const existingAccounts = getAccounts();
+    const candidates = [];
+    const seenEmails = new Set();
 
-    candidates.push({
-      pid: srv.pid,
-      userDataDir: srv.userDataDir,
-      email,
-      name: name || email || 'Antigravity User',
-      accountObj,
-      isAlreadyRegistered,
-    });
+    for (const srv of servers) {
+      const email = srv.activeEmail || null;
+      const name  = srv.lastParsedUserStatus?.name || null;
+      const body  = srv.lastRawResponseBody || null;
+
+      if (!email) continue;
+
+      const emailLower = email.toLowerCase().trim();
+      if (seenEmails.has(emailLower)) continue;
+      seenEmails.add(emailLower);
+
+      const isAlreadyRegistered = existingAccounts.some(a => (a.email || '').toLowerCase().trim() === emailLower);
+
+      let accountObj = null;
+      if (body) {
+        try {
+          const parsedBody = JSON.parse(body);
+          const userStatus = parsedBody.userStatus || parsedBody;
+          accountObj = buildAccountFromUserStatusHelper(userStatus, srv.userDataDir, existingAccounts.length + candidates.length);
+        } catch (e) {
+          console.warn(`[Lune detect-running-accounts] Exception building accountObj for PID ${srv.pid}:`, e.message);
+        }
+      }
+
+      if (!accountObj) continue;
+
+      candidates.push({
+        pid: srv.pid,
+        userDataDir: srv.userDataDir,
+        email,
+        name: name || accountObj.name || email,
+        isAlreadyRegistered,
+        accountObj,
+      });
+    }
+
+    if (candidates.length === 0) {
+      return { ok: false, error: 'not-logged-in', message: 'Running Antigravity IDE instance is not logged in to any account.' };
+    }
+
+    return { ok: true, candidates };
+  })();
+
+  try {
+    return await detectScanInFlightPromise;
+  } finally {
+    detectScanInFlightPromise = null;
   }
-
-  if (candidates.length === 0) {
-    return { ok: false, error: 'not-logged-in', message: 'Running Antigravity IDE instance is not logged in to any account.' };
-  }
-
-  return { ok: true, candidates };
 });
 
 // Helper for avatar colors
@@ -513,6 +537,7 @@ function buildAccountFromUserStatusHelper(userStatus, profilePath, existingAccou
     planName,
     teamsTier,
     lastSync: Date.now(),
+    lastSyncedAt: Date.now(),
     previousSnapshot: null,
     promptCredits,
     flowCredits,
@@ -619,37 +644,36 @@ ipcMain.handle('refresh-account', async (event, { profilePath, accountId }) => {
     return { authenticated: false };
   }
 
-  // â”€â”€ 1b. Direct query on already-running instance â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   let queryResponse = null;
   try {
-    console.log(`[Lune refresh-account] Checking for already-running instance matching userDataDir=${profilePath}...`);
+    logger.debug(`[Lune refresh-account] Checking for already-running instance matching userDataDir=${profilePath}...`);
     const existingLsp = ag.findRunningLanguageServerForProfile(profilePath);
     if (existingLsp) {
-      console.log(`[Lune refresh-account] Found matching running instance for userDataDir=${profilePath} at PID ${existingLsp.pid}`);
-      const ports = ag.findListeningPorts(existingLsp.pid);
+      logger.debug(`[Lune refresh-account] Found matching running instance for userDataDir=${profilePath} at PID ${existingLsp.pid}`);
+      const ports = await ag.findListeningPorts(existingLsp.pid);
       const csrfToken = ag.getCsrfToken(existingLsp.commandLine, profilePath);
-      console.log(`[Lune refresh-account] Existing instance candidate listening ports: [${ports.join(', ')}]`);
+      logger.debug(`[Lune refresh-account] Existing instance candidate listening ports: [${ports.join(', ')}]`);
       if (ports.length > 0 && csrfToken) {
         send('querying');
         for (const port of ports) {
-          console.log(`[Lune refresh-account] Trying candidate port ${port} (candidate ports: [${ports.join(', ')}])...`);
+          logger.debug(`[Lune refresh-account] Trying candidate port ${port} (candidate ports: [${ports.join(', ')}])...`);
           const res = await ag.queryUserStatus(port, csrfToken);
           if (res.ok) {
             queryResponse = res;
-            console.log(`[Lune refresh-account] Direct Query SUCCEEDED on TCP port ${port}! (${res.durationMs} ms)`);
+            logger.debug(`[Lune refresh-account] Direct Query SUCCEEDED on TCP port ${port}! (${res.durationMs} ms)`);
             break;
           }
         }
       }
     } else {
-      console.log(`[Lune refresh-account] No matching running instance found for userDataDir=${profilePath}, spawning fresh.`);
+      logger.debug(`[Lune refresh-account] No matching running instance found for userDataDir=${profilePath}, spawning fresh.`);
     }
   } catch (e) {
-    console.info('[Lune refresh-account] Direct query on existing process skipped:', e.message);
+    logger.info('[Lune refresh-account] Direct query on existing process skipped:', e.message);
   }
 
   if (!queryResponse) {
-    // â”€â”€ 2. Spawn on hidden desktop â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── 2. Spawn on hidden desktop ──────────────────────────────────────────
     send('launching');
     let spawnResult;
     try {
@@ -660,7 +684,7 @@ ipcMain.handle('refresh-account', async (event, { profilePath, accountId }) => {
 
     const { pid, hProcess, hDesktop } = spawnResult;
 
-    // â”€â”€ 3. Wait for Language Server â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── 3. Wait for Language Server ────────────────────────────────────────
     let lspProc;
     try {
       send('waiting-lsp');
@@ -676,13 +700,13 @@ ipcMain.handle('refresh-account', async (event, { profilePath, accountId }) => {
       return { authenticated: true, ok: false, status: 'unreachable', unreachable: true, error: 'lsp-timeout: ' + err.message };
     }
 
-    // â”€â”€ 4. Find ports & CSRF token, then query GetUserStatus â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── 4. Find ports & CSRF token, then query GetUserStatus ────────────────
     send('querying');
     try {
-      const ports = ag.findListeningPorts(lspProc.pid);
+      const ports = await ag.findListeningPorts(lspProc.pid);
       const csrfToken = ag.getCsrfToken(lspProc.commandLine, profilePath);
 
-      console.log(`[Lune main.js] Hidden desktop LSP PID ${lspProc.pid} detected. Candidate listening ports: [${ports.join(', ')}]`);
+      logger.debug(`[Lune main.js] Hidden desktop LSP PID ${lspProc.pid} detected. Candidate listening ports: [${ports.join(', ')}]`);
 
       if (!ports.length) {
         throw new Error('no LISTENING ports found for LSP pid ' + lspProc.pid);
@@ -695,12 +719,12 @@ ipcMain.handle('refresh-account', async (event, { profilePath, accountId }) => {
       let usedPort = null;
       let lastErr = null;
       for (const port of ports) {
-        console.log(`[Lune main.js] Trying candidate listening port ${port} (candidate ports: [${ports.join(', ')}])...`);
+        logger.debug(`[Lune main.js] Trying candidate listening port ${port} (candidate ports: [${ports.join(', ')}])...`);
         const res = await ag.queryUserStatus(port, csrfToken);
         if (res.ok) {
           queryResponse = res;
           usedPort = port;
-          console.log(`[Lune main.js] Hidden Desktop Query SUCCEEDED on TCP port ${port}! (${res.durationMs} ms)`);
+          logger.debug(`[Lune main.js] Hidden Desktop Query SUCCEEDED on TCP port ${port}! (${res.durationMs} ms)`);
           break;
         }
         lastErr = res.error;
@@ -716,16 +740,19 @@ ipcMain.handle('refresh-account', async (event, { profilePath, accountId }) => {
       return { authenticated: true, ok: false, status: 'unreachable', unreachable: true, error: 'query failed: ' + err.message };
     }
 
-    // â”€â”€ 5. Cleanup â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── 5. Cleanup ──────────────────────────────────────────────────────────
+    send('cleanup');
+    try { ag.killProcessTree(pid, profilePath); } catch (_) {}
+    // ── 5. Cleanup ──────────────────────────────────────────────────────────
     send('cleanup');
     try { ag.killProcessTree(pid, profilePath); } catch (_) {}
     try { ag.closeHiddenDesktop(hDesktop, hProcess); } catch (_) {}
   }
 
-  // â”€â”€ 6. Done â€” return real API payload to renderer â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── 6. Done — return real API payload to renderer ──────────────────────
   send('done');
 
-  console.log('[Lune main.js] GetUserStatus RAW JSON body:\n' + queryResponse.body);
+  logger.debug('[Lune main.js] GetUserStatus RAW JSON body:\n' + queryResponse?.body);
 
   let name = null;
   let email = null;
@@ -906,6 +933,8 @@ function updateAccountFromUserStatus(acc, parsed) {
   acc.userTierName = parsed.userTierName || acc.userTierName || null;
   acc.plan = parsed.userTierName || parsed.planName || parsed.teamsTier || acc.plan || 'Google AI Pro';
 
+  acc.lastSyncedAt = Date.now();
+  acc.lastSync = Date.now();
   acc.promptCredits = parsed.promptCredits || acc.promptCredits || null;
   acc.flowCredits = parsed.flowCredits || acc.flowCredits || null;
   if (parsed.modelQuotas && parsed.modelQuotas.length > 0) {
@@ -942,7 +971,7 @@ function updateAccountFromUserStatus(acc, parsed) {
  * Updates lastSync ONLY on confirmed success for that specific account (Part 8).
  */
 async function refreshAllAccountsHelper() {
-  console.log('[Lune main.js] Starting bulk refresh for all registered accounts...');
+  logger.debug('[Lune main.js] Starting bulk refresh for all registered accounts...');
   const accounts = getAccounts(); // use shared authoritative array
   if (!accounts || accounts.length === 0) return [];
 
@@ -966,7 +995,7 @@ async function refreshAllAccountsHelper() {
     const lspMatch = matchMap.get(acc);
 
     if (lspMatch && lspMatch.ports && lspMatch.ports.length > 0 && lspMatch.csrfToken) {
-      console.log(`[Lune refresh-all] Account ${acc.name} matched running process (PID ${lspMatch.pid}). Trying direct query...`);
+      logger.debug(`[Lune refresh-all] Account ${acc.name} matched running process (PID ${lspMatch.pid}). Trying direct query...`);
       for (const port of lspMatch.ports) {
         const res = await ag.queryUserStatus(port, lspMatch.csrfToken);
         if (res.ok && res.body) {
@@ -983,7 +1012,7 @@ async function refreshAllAccountsHelper() {
             acc.status = 'active';
             acc.unreachable = false;
             refreshedOk = true;
-            console.log(`[Lune refresh-all] Direct refresh SUCCEEDED for ${acc.name}`);
+            logger.debug(`[Lune refresh-all] Direct refresh SUCCEEDED for ${acc.name}`);
           } catch (e) {
             console.warn(`[Lune refresh-all] Error parsing direct status for ${acc.name}:`, e.message);
           }
@@ -994,7 +1023,7 @@ async function refreshAllAccountsHelper() {
 
     // Fall back to hidden desktop spawn if direct query was not applicable or failed
     if (!refreshedOk) {
-      console.log(`[Lune refresh-all] No running match for ${acc.name}, spawning hidden desktop...`);
+      logger.debug(`[Lune refresh-all] No running match for ${acc.name}, spawning hidden desktop...`);
       try {
         const authResult = ag.detectAuthState(profilePath);
         if (!authResult.isAuthenticated) {
@@ -1042,7 +1071,7 @@ async function refreshAllAccountsHelper() {
       // Part 9: No match found and no spawn succeeded â€” leave all existing data EXACTLY as-is.
       // Setting unreachable here would overwrite last-known real values; instead we simply skip.
       // The renderer already knows this account wasn't refreshed because no IPC event is emitted for it.
-      console.log(`[Lune refresh-all] No successful refresh for ${acc.name} â€” leaving last known data untouched.`);
+      logger.debug(`[Lune refresh-all] No successful refresh for ${acc.name} — leaving last known data untouched.`);
     }
 
     // Send card done event (Part 7)
@@ -1070,20 +1099,27 @@ const watcherOnlineAccountIds = new Set();
 // setInterval fires every 9s regardless of whether the previous async tick completed.
 // Concurrent ticks both mutate watcherOnlineAccountIds, causing brief "wrong account Live" flashes.
 let watcherRunning = false;
+let lastSyncedActiveIdsKey = null;
 
 async function runLiveWatcher() {
-  // Skip this tick if a previous tick is still running (prevents concurrent mutation of
-  // watcherOnlineAccountIds which is the root cause of "wrong account Live" flashes).
   if (watcherRunning) {
-    console.log('[Lune watcher] Previous tick still in-flight â€” skipping this tick.');
+    logger.debug('[Lune watcher] Previous tick still in-flight — skipping this tick.');
     return;
   }
   watcherRunning = true;
   let servers = [];
   try {
-    const accounts = getAccounts(); // authoritative shared array â€” never a stale local copy
-    const rawServers = ag.findAllActiveRunningLanguageServers() || [];
+    const t0 = Date.now();
+    const accounts = getAccounts();
+    const rawServers = (await ag.findAllActiveRunningLanguageServers()) || [];
+    const tScan = Date.now() - t0;
+
+    const tResolveStart = Date.now();
     servers = await resolveAndDeduplicateServers(rawServers);
+    const tResolve = Date.now() - tResolveStart;
+    const tTotal = Date.now() - t0;
+
+    logger.debug(`[PERF] watcher: ${tTotal}ms | scan: ${tScan}ms | resolve: ${tResolve}ms`);
 
     if (!accounts || accounts.length === 0) {
       for (const id of Array.from(watcherOnlineAccountIds)) {
@@ -1106,12 +1142,8 @@ async function runLiveWatcher() {
     }
 
     const matchMap = ag.matchAccountToRunningProcess(servers, accounts);
+    logger.debug(`[Lune watcher] tick — ${servers.length} server(s), ${accounts.length} saved account(s)`);
 
-    // Concise per-tick summary log (not per-PID verbose)
-    console.log(`[Lune watcher] tick â€” ${servers.length} server(s), ${accounts.length} saved account(s)`);
-
-    // Determine which accounts are online THIS tick and emit status changes.
-    // FIRST PASS: Calculate exact online set for this tick with strict email deduplication.
     const currentOnlineAccountIds = new Set();
     const seenActiveEmails = new Set();
 
@@ -1121,7 +1153,6 @@ async function runLiveWatcher() {
                         acc.email && lsp.activeEmail && acc.email.toLowerCase().trim() === lsp.activeEmail.toLowerCase().trim());
       if (isOnline) {
         const normEmail = acc.email.toLowerCase().trim();
-        // Strict guard: ensure each active email maps to EXACTLY ONE primary saved account card
         if (!seenActiveEmails.has(normEmail)) {
           seenActiveEmails.add(normEmail);
           currentOnlineAccountIds.add(acc.id);
@@ -1129,28 +1160,25 @@ async function runLiveWatcher() {
       }
     }
 
-    // Step A: Send OFFLINE events FIRST so old Live badges are removed immediately before new ones are added.
+    // Step A: Send OFFLINE events FIRST
     for (const id of Array.from(watcherOnlineAccountIds)) {
       if (!currentOnlineAccountIds.has(id)) {
         watcherOnlineAccountIds.delete(id);
-        // Reset the live-update rate limiter for this account: it's going offline, so when it
-        // next comes online (e.g. user switches back to it), we want to sync immediately rather
-        // than waiting out the full WATCHER_QUERY_INTERVAL_MS from its last successful query.
         lastWatcherQueryMs.delete(id);
         const offlineAcc = accounts.find(a => a.id === id);
-        console.log(`[Lune watcher] OFFLINE: ${offlineAcc?.email || id} (id=${id}) â€” no longer matched on any running process this tick.`);
+        logger.debug(`[Lune watcher] OFFLINE: ${offlineAcc?.email || id} (id=${id}) — no longer matched on any running process this tick.`);
         if (mainWindow && !mainWindow.isDestroyed()) {
           mainWindow.webContents.send('account-online-status', { accountId: id, isOnline: false });
         }
       }
     }
 
-    // Step B: Send ONLINE events SECOND for newly online accounts.
+    // Step B: Send ONLINE events SECOND
     for (const id of currentOnlineAccountIds) {
       if (!watcherOnlineAccountIds.has(id)) {
         watcherOnlineAccountIds.add(id);
         const onlineAcc = accounts.find(a => a.id === id);
-        console.log(`[Lune watcher] ONLINE: ${onlineAcc?.email || id} (id=${id}) â€” matched on a running process this tick.`);
+        logger.debug(`[Lune watcher] ONLINE: ${onlineAcc?.email || id} (id=${id}) — matched on a running process this tick.`);
         if (mainWindow && !mainWindow.isDestroyed()) {
           mainWindow.webContents.send('account-online-status', { accountId: id, isOnline: true });
         }
@@ -1159,12 +1187,7 @@ async function runLiveWatcher() {
 
     for (const acc of accounts) {
       const lsp = matchMap.get(acc);
-
-      // No running process matched this account this tick â€” skip entirely.
-      // Do NOT emit any IPC event or modify this account's data in any way.
-      // Last known real values must remain intact until a genuine successful query occurs.
       if (!lsp || !lsp.ports || lsp.ports.length === 0 || !lsp.csrfToken) continue;
-
       if (watcherInFlightAccounts.has(acc.id)) continue;
 
       const lastQuery = lastWatcherQueryMs.get(acc.id) || 0;
@@ -1175,9 +1198,6 @@ async function runLiveWatcher() {
       let parsed = lsp.lastParsedUserStatus;
       let body = lsp.lastRawResponseBody;
 
-      // Re-query if we have no parsed result OR the cached result has no email.
-      // A truthy-but-email-less object (e.g. {} from a failed parse) must NOT
-      // prevent a fresh query — otherwise this account would never show as Live.
       if (!parsed || !parsed.email) {
         for (const port of lsp.ports) {
           watcherInFlightAccounts.add(acc.id);
@@ -1187,7 +1207,6 @@ async function runLiveWatcher() {
               try {
                 parsed = parseUserStatusBody(res.body);
                 body = res.body;
-                // Backfill cache so resolveAndDeduplicateServers benefits next tick.
                 if (parsed && parsed.email) {
                   lsp.lastParsedUserStatus = parsed;
                   lsp.lastRawResponseBody  = body;
@@ -1203,17 +1222,16 @@ async function runLiveWatcher() {
       }
 
       if (parsed && parsed.email) {
-        // Strict email match: only update this account if the email matches the saved record.
         if (acc.email && parsed.email.toLowerCase().trim() !== acc.email.toLowerCase().trim()) {
           continue;
         }
 
         updateAccountFromUserStatus(acc, parsed);
         acc.lastSync = Date.now();
+        acc.lastSyncedAt = Date.now();
         acc.lastSyncSource = 'auto';
         acc.authenticated = true;
         acc.status = 'active';
-        // Only persist when data actually changed â€” dirty flag prevents overwriting deletions.
         markAccountsDirty();
         persistIfDirty();
 
@@ -1223,6 +1241,7 @@ async function runLiveWatcher() {
             authenticated: true,
             ok: true,
             lastSyncSource: 'auto',
+            lastSyncedAt: acc.lastSyncedAt,
             name: parsed.name,
             email: parsed.email,
             planName: parsed.planName,
@@ -1240,10 +1259,14 @@ async function runLiveWatcher() {
     if (mainWindow && !mainWindow.isDestroyed()) {
       const activeIds = Array.from(currentOnlineAccountIds);
       const activeEmails = activeIds.map(id => accounts.find(a => a.id === id)?.email).filter(Boolean);
-      mainWindow.webContents.send('account-online-status-sync', { activeAccountIds: activeIds, activeEmails });
+      const key = activeIds.sort().join(',') + '|' + activeEmails.sort().join(',');
+      if (key !== lastSyncedActiveIdsKey) {
+        lastSyncedActiveIdsKey = key;
+        mainWindow.webContents.send('account-online-status-sync', { activeAccountIds: activeIds, activeEmails });
+      }
     }
   } catch (err) {
-    console.warn('[Lune watcher] Tick error:', err.message);
+    logger.warn('[Lune watcher] Tick error:', err.message);
   } finally {
     watcherRunning = false;
   }
@@ -1265,7 +1288,7 @@ ipcMain.handle('remove-account', async (event, { accountId }) => {
     return { ok: true }; // idempotent
   }
   const removed = accounts.splice(idx, 1)[0];
-  console.log(`[Lune remove-account] Removed ${removed.email || accountId} from in-memory array. Persisting immediately.`);
+  logger.debug(`[Lune remove-account] Removed ${removed.email || accountId} from in-memory array. Persisting immediately.`);
   // Mark dirty and persist synchronously BEFORE returning to the renderer
   // so the authoritative array and disk are both updated in the same microtask.
   // The watcher's next tick will read getAccounts() which already has the deletion.
@@ -1280,10 +1303,10 @@ ipcMain.handle('remove-account', async (event, { accountId }) => {
 // â”€â”€ Window factory â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function createWindow() {
   const win = new BrowserWindow({
+    title: 'Lune - Agent tracking dashboard',
     width: 1280,
     height: 800,
     minWidth: 900,
-    minHeight: 600,
     backgroundColor: '#11131A',        // matches the dashboard body background
     show: false,                        // reveal only after content is ready
     webPreferences: {
@@ -1294,12 +1317,15 @@ function createWindow() {
     },
   });
 
+  win.removeMenu();
+  Menu.setApplicationMenu(null);
+
   mainWindow = win;
   win.loadFile('index.html');
 
   // Instant scan on window focus (reuses watcherRunning guard inside runLiveWatcher)
   win.on('focus', () => {
-    console.log('[Lune main.js] Window focused — triggering instant watcher scan');
+    logger.debug('[Lune main.js] Window focused — triggering instant watcher scan');
     runLiveWatcher().catch(err => {
       console.warn('[Lune main.js] Focus watcher scan error:', err.message);
     });
@@ -1311,6 +1337,10 @@ function createWindow() {
 
 // â”€â”€ Lifecycle â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 app.whenReady().then(() => {
+  if (process.platform === 'win32') {
+    app.setAppUserModelId('com.lune.app');
+  }
+
   // Initialise the single authoritative in-memory accounts array from disk.
   // From this point on, all code must use getAccounts() rather than loadAccountsFromDisk().
   reloadAccountsFromDisk();
