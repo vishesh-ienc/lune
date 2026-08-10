@@ -145,33 +145,12 @@ function saveAccountsToDisk(accounts) {
   }
 }
 
-// â”€â”€ Shared Utility: Parse identity from raw GetUserStatus response body â”€â”€â”€â”€â”€â”€â”€
-
-/**
- * Extracts { email, name } from a raw JSON string returned by GetUserStatus.
- * Returns { email: null, name: null } if parsing fails or no identity is found.
- */
-function parseUserStatusBody(rawBody) {
-  try {
-    const parsed = JSON.parse(rawBody);
-    const userStatus = parsed.userStatus || parsed;
-    const userObj = userStatus.user || userStatus.userInfo || userStatus;
-    const email = userObj.email || userObj.emailAddress || userStatus.email || null;
-    const name  = userObj.name || userObj.displayName || userObj.fullName || userStatus.name || null;
-    return { email, name };
-  } catch (_) {
-    return { email: null, name: null };
-  }
-}
+// parseUserStatusBody is defined below near updateAccountFromUserStatus (full version with quotas).
 
 /**
  * Resolves activeEmail for each running server in the list over HTTP.
  * Keeps all server processes that successfully respond with a valid activeEmail.
  * Deduplicates by activeEmail so each unique authenticated identity is tracked.
- *
- * NOTE (diagnostic): We intentionally do NOT skip the HTTP query based on a
- * previously-set server.activeEmail here. The only caching that happens is
- * within a single call (seenEmails dedup). Each tick gets a fresh query.
  */
 async function resolveAndDeduplicateServers(servers) {
   if (!servers || !Array.isArray(servers) || servers.length === 0) return [];
@@ -182,11 +161,7 @@ async function resolveAndDeduplicateServers(servers) {
   for (const server of servers) {
     if (!server.ports || server.ports.length === 0 || !server.csrfToken) continue;
 
-    // DIAGNOSTIC: always note whether this server already had a cached identity
-    // from a previous tick (set by a prior resolveAndDeduplicateServers call).
-    const hadCachedEmail = !!(server.activeEmail);
-
-    let email = null;  // Always resolve fresh â€” never short-circuit on server.activeEmail
+    let email = null;
     let parsed = null;
     let body = null;
 
@@ -199,44 +174,133 @@ async function resolveAndDeduplicateServers(servers) {
             email = p.email;
             parsed = p;
             body = res.body;
-            console.log(`[Lune resolve-servers] PID ${server.pid} port ${port}: fresh query returned email=${email}` +
-              (hadCachedEmail ? ` (was cached as ${server.activeEmail}${server.activeEmail !== email ? ' â€” IDENTITY CHANGED!' : ''})` : ' (no prior cache)'));
             break;
           }
         }
       } catch (err) {
-        console.log(`[Lune resolve-servers] PID ${server.pid} port ${port}: query failed â€” ${err.message}`);
+        console.log(`[Lune resolve-servers] PID ${server.pid} port ${port}: query failed — ${err.message}`);
       }
     }
 
     if (!email) {
-      console.log(`[Lune resolve-servers] PID ${server.pid}: no email resolved from any port [${server.ports.join(', ')}]` +
-        (hadCachedEmail ? ` (had cached email=${server.activeEmail})` : ''));
+      console.log(`[Lune resolve-servers] PID ${server.pid}: no email resolved — skipping.`);
+      continue;
     }
 
-    if (email) {
-      // Update cached identity on the object (used by watcher's live-update loop,
-      // Update cached identity on the object (used by watcher's live-update loop).
-      server.activeEmail = email;
-      server.lastParsedUserStatus = parsed;
-      server.lastRawResponseBody = body;
+    // Cache resolved identity on the server object for downstream consumers.
+    server.activeEmail = email;
+    server.lastParsedUserStatus = parsed;
+    server.lastRawResponseBody = body;
 
-      const emailLower = email.toLowerCase().trim();
-      if (!seenEmails.has(emailLower)) {
-        seenEmails.add(emailLower);
-        resolvedServers.push(server);
-      } else {
-        console.log(`[Lune resolve-servers] PID ${server.pid}: email ${emailLower} already seen this tick â€” deduped out.`);
-      }
+    const emailLower = email.toLowerCase().trim();
+    if (!seenEmails.has(emailLower)) {
+      seenEmails.add(emailLower);
+      resolvedServers.push(server);
+      console.log(`[Lune resolve-servers] PID ${server.pid}: resolved email=${email}.`);
     }
   }
 
   return resolvedServers;
 }
 
-// â”€â”€ IPC Handlers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Diagnostic Logging Helpers ────────────────────────────────────────────
 
-// Load accounts â€” returns the live in-memory array (no disk read needed after init)
+function extractModelSummaries(body) {
+  if (!body) return [];
+  try {
+    const parsed = JSON.parse(body);
+    const userStatus = parsed.userStatus || parsed;
+    const configs = userStatus.cascadeModelConfigData?.clientModelConfigs || [];
+    return configs.map(cfg => {
+      const q = cfg.quotaInfo || {};
+      return {
+        label: cfg.label || cfg.modelName || cfg.name || 'Unknown',
+        fraction: q.remainingFraction !== undefined ? q.remainingFraction : null,
+        resetTime: q.resetTime || null,
+        fiveHourFraction: q.fiveHourRemainingFraction ?? q.shortTermRemainingFraction ?? null,
+        fiveHourResetTime: q.fiveHourResetTime || q.shortTermResetTime || null
+      };
+    });
+  } catch (e) {
+    return [];
+  }
+}
+
+function logDiagnosticComparison(usedPort, candidatePorts, body1, durationMs1, body2, durationMs2) {
+  console.log('\n' + '='.repeat(80));
+  console.log('  [LUNE DIAGNOSTIC INSTRUMENTATION LOG]');
+  console.log('='.repeat(80));
+  console.log(`  Target Port Used   : ${usedPort}`);
+  console.log(`  Candidate Ports    : [${candidatePorts.join(', ')}] (Total: ${candidatePorts.length})`);
+  console.log(`  Query 1 Timing     : ${durationMs1} ms post-LSP detection (Immediate)`);
+  console.log(`  Query 2 Timing     : ${durationMs2} ms post-LSP detection (+5s delay)`);
+  console.log('-'.repeat(80));
+
+  const models1 = extractModelSummaries(body1);
+  const models2 = extractModelSummaries(body2);
+
+  console.log('\n  [QUERY 1 MODEL QUOTAS & RESET TIMES (t = 0s)]');
+  if (models1.length === 0) {
+    console.log('    (No models found in body 1)');
+  } else {
+    models1.forEach(m => {
+      console.log(`    • ${m.label.padEnd(25)} | Fraction: ${String(m.fraction).padEnd(8)} | ResetTime: ${m.resetTime || 'N/A'}`);
+      if (m.fiveHourResetTime || m.fiveHourFraction !== null) {
+        console.log(`      └─ 5h Window             | 5hFraction: ${String(m.fiveHourFraction).padEnd(6)} | 5hResetTime: ${m.fiveHourResetTime || 'N/A'}`);
+      }
+    });
+  }
+
+  if (body2) {
+    console.log('\n  [QUERY 2 MODEL QUOTAS & RESET TIMES (t = +5s)]');
+    if (models2.length === 0) {
+      console.log('    (No models found in body 2)');
+    } else {
+      models2.forEach(m => {
+        console.log(`    • ${m.label.padEnd(25)} | Fraction: ${String(m.fraction).padEnd(8)} | ResetTime: ${m.resetTime || 'N/A'}`);
+        if (m.fiveHourResetTime || m.fiveHourFraction !== null) {
+          console.log(`      └─ 5h Window             | 5hFraction: ${String(m.fiveHourFraction).padEnd(6)} | 5hResetTime: ${m.fiveHourResetTime || 'N/A'}`);
+        }
+      });
+    }
+
+    console.log('\n  [SIDE-BY-SIDE STALENESS COMPARISON]');
+    const allLabels = Array.from(new Set([...models1.map(m => m.label), ...models2.map(m => m.label)]));
+    let anyDifference = false;
+    allLabels.forEach(lbl => {
+      const m1 = models1.find(m => m.label === lbl) || {};
+      const m2 = models2.find(m => m.label === lbl) || {};
+
+      const f1Str = m1.fraction !== undefined && m1.fraction !== null ? m1.fraction.toString() : 'N/A';
+      const f2Str = m2.fraction !== undefined && m2.fraction !== null ? m2.fraction.toString() : 'N/A';
+      const match = f1Str === f2Str && m1.resetTime === m2.resetTime;
+
+      if (!match) anyDifference = true;
+      const statusTag = match ? '✓ IDENTICAL (SETTLED)' : '✖ DIFFERENT (SYNCING IN PROGRESS!)';
+
+      console.log(`    ${lbl.padEnd(25)} | Q1 (t=0s): ${f1Str.padEnd(7)} | Q2 (t=+5s): ${f2Str.padEnd(7)} | ${statusTag}`);
+    });
+
+    console.log('\n  [EVIDENCE CONCLUSION]');
+    if (anyDifference) {
+      console.log('    ⚠ STALENESS DETECTED: Quota data updated between Query 1 and Query 2! The LSP was killed too early during backend sync.');
+    } else {
+      console.log('    ✓ NO EARLY-KILL STALENESS: Data remained identical across the 5s window. Initial response was already settled.');
+    }
+  }
+
+  console.log('\n  [FULL RAW JSON RESPONSE — QUERY 1]');
+  console.log(body1 || '(empty)');
+  if (body2) {
+    console.log('\n  [FULL RAW JSON RESPONSE — QUERY 2 (+5s)]');
+    console.log(body2 || '(empty)');
+  }
+  console.log('='.repeat(80) + '\n');
+}
+
+// ── IPC Handlers ──────────────────────────────────────────────────────────
+
+// Load accounts — returns the live in-memory array (no disk read needed after init)
 ipcMain.handle('load-accounts', async () => {
   return getAccounts();
 });
@@ -250,6 +314,66 @@ ipcMain.handle('save-accounts', async (event, accounts) => {
     markAccountsDirty();
   }
   return saveAccountsToDisk(accounts);
+});
+
+/**
+ * 'detect-running-accounts' — Scan for all active Language Server processes and return
+ * candidate accounts along with duplicate registration status.
+ */
+ipcMain.handle('detect-running-accounts', async () => {
+  const rawServers = ag.findAllActiveRunningLanguageServers() || [];
+  const servers = await resolveAndDeduplicateServers(rawServers);
+  console.log(`[Lune detect-running-accounts] Found ${servers.length} running Language Server process(es)`);
+
+  if (servers.length === 0) {
+    return { ok: false, error: 'no-running-lsp', message: 'No running Antigravity IDE process found on your PC.' };
+  }
+
+  const existingAccounts = getAccounts();
+  const candidates = [];
+  const seenEmails = new Set();
+
+  for (const srv of servers) {
+    const email = srv.activeEmail || null;
+    const name  = srv.lastParsedUserStatus?.name || null;
+    const body  = srv.lastRawResponseBody || null;
+
+    if (!email) continue;
+
+    const emailLower = email.toLowerCase().trim();
+    if (seenEmails.has(emailLower)) continue;
+    seenEmails.add(emailLower);
+
+    const isAlreadyRegistered = existingAccounts.some(a => (a.email || '').toLowerCase().trim() === emailLower);
+
+    let accountObj = null;
+    if (body) {
+      try {
+        const parsedBody = JSON.parse(body);
+        const userStatus = parsedBody.userStatus || parsedBody;
+        accountObj = buildAccountFromUserStatusHelper(userStatus, srv.userDataDir, existingAccounts.length + candidates.length);
+      } catch (e) {
+        console.warn(`[Lune detect-running-accounts] Exception building accountObj for PID ${srv.pid}:`, e.message);
+      }
+    }
+
+    if (!accountObj) continue;
+
+    candidates.push({
+      pid: srv.pid,
+      userDataDir: srv.userDataDir,
+      email,
+      name: name || email || 'Antigravity User',
+      accountObj,
+      isAlreadyRegistered,
+    });
+  }
+
+  if (candidates.length === 0) {
+    return { ok: false, error: 'not-logged-in', message: 'Running Antigravity IDE instance is not logged in to any account.' };
+  }
+
+  return { ok: true, candidates };
 });
 
 // Helper for avatar colors
@@ -435,77 +559,7 @@ function buildAccountFromUserStatusHelper(userStatus, profilePath, existingAccou
 }
 
 /**
- * 'detect-running-accounts' â€” Scan for all active Language Server processes, query GetUserStatus for each independently,
- * and return candidate accounts along with duplicate registration status.
- */
-ipcMain.handle('detect-running-accounts', async () => {
-  const rawServers = ag.findAllActiveRunningLanguageServers() || [];
-  const servers = await resolveAndDeduplicateServers(rawServers);
-  console.log(`[Lune detect-running-accounts] Found ${servers.length} running Language Server process(es)`);
-
-  if (servers.length === 0) {
-    return { ok: false, error: 'no-running-lsp', message: 'No running Antigravity IDE process found on your PC.' };
-  }
-
-  const existingAccounts = getAccounts();
-  const candidates = [];
-  const seenEmails = new Set();
-
-  for (const srv of servers) {
-    if (!srv.ports || srv.ports.length === 0 || !srv.csrfToken) {
-      console.warn(`[Lune detect-running-accounts] PID ${srv.pid} missing ports or csrfToken`);
-      continue;
-    }
-
-    for (const port of srv.ports) {
-      const res = await ag.queryUserStatus(port, srv.csrfToken);
-      if (res.ok && res.body) {
-        try {
-          const parsedBody = JSON.parse(res.body);
-          const userStatus = parsedBody.userStatus || parsedBody;
-          const userObj = userStatus.user || userStatus.userInfo || userStatus;
-          const name = userObj.name || userObj.displayName || userObj.fullName || userStatus.name || null;
-          const email = userObj.email || userObj.emailAddress || userStatus.email || null;
-
-          if (email || name) {
-            const emailLower = (email || '').toLowerCase().trim();
-            if (emailLower && seenEmails.has(emailLower)) {
-              // Avoid duplicate entries in candidate list if multiple ports belong to same account
-              break;
-            }
-            if (emailLower) seenEmails.add(emailLower);
-
-            const isAlreadyRegistered = emailLower ? existingAccounts.some(a => (a.email || '').toLowerCase().trim() === emailLower) : false;
-
-            // Build full account candidate object
-            const accountObj = buildAccountFromUserStatusHelper(userStatus, srv.userDataDir, existingAccounts.length + candidates.length);
-
-            candidates.push({
-              pid: srv.pid,
-              userDataDir: srv.userDataDir,
-              email: email || '',
-              name: name || email || 'Antigravity User',
-              accountObj,
-              isAlreadyRegistered,
-            });
-            break; // Stop testing other ports for this process
-          }
-        } catch (e) {
-          console.warn(`[Lune detect-running-accounts] Exception parsing GetUserStatus from PID ${srv.pid} port ${port}:`, e.message);
-        }
-      }
-    }
-  }
-
-  if (candidates.length === 0) {
-    return { ok: false, error: 'not-logged-in', message: 'Running Antigravity IDE instance is not logged in to any account.' };
-  }
-
-  return { ok: true, candidates };
-});
-
-/**
- * 'save-imported-account' â€” Persists a candidate account object selected by the user to accounts.json.
+ * 'save-imported-account' — Persists a candidate account object selected by the user to accounts.json.
  */
 ipcMain.handle('save-imported-account', async (event, accountObj) => {
   if (!accountObj || !accountObj.email) {
@@ -520,7 +574,6 @@ ipcMain.handle('save-imported-account', async (event, accountObj) => {
   markAccountsDirty();
   const saveRes = persistIfDirty();
   if (!saveRes.ok) {
-    // Roll back in-memory push on failure
     accounts.splice(accounts.indexOf(accountObj), 1);
     return { ok: false, error: saveRes.error || 'save-failed', message: 'Failed to save account to disk.' };
   }
@@ -533,7 +586,7 @@ ipcMain.handle('ping', async () => {
 });
 
 /**
- * 'launch-account' â€” launch visible, interactive Antigravity IDE window for a profile.
+ * 'launch-account' — launch visible, interactive Antigravity IDE window for a profile.
  */
 ipcMain.handle('launch-account', async (event, { profilePath }) => {
   try {
@@ -547,18 +600,7 @@ ipcMain.handle('launch-account', async (event, { profilePath }) => {
 });
 
 /**
- * 'refresh-account' â€” full hidden-desktop refresh cycle for one authenticated profile.
- *
- * Renderer calls: ipcRenderer.invoke('refresh-account', { profilePath, accountId })
- * Progress events: ipcRenderer.on('refresh-status', (_, { accountId, stage }) => â€¦)
- *
- * Stage sequence (happy path):
- *   auth-check â†’ launching â†’ waiting-lsp â†’ querying â†’ cleanup â†’ done
- *
- * On auth-check failure: returns { authenticated: false }  (no spawn).
- * On any later failure:  returns { authenticated: true, error: '<what failed>' }
- *   Cleanup (killProcessTree / closeHiddenDesktop) still runs even on error
- *   so no orphan processes are left behind.
+ * 'refresh-account' — full hidden-desktop refresh cycle for one authenticated profile.
  */
 ipcMain.handle('refresh-account', async (event, { profilePath, accountId }) => {
   if (!profilePath) {
@@ -566,7 +608,6 @@ ipcMain.handle('refresh-account', async (event, { profilePath, accountId }) => {
   }
   const send = (stage) => event.sender.send('refresh-status', { accountId, stage });
 
-  // â”€â”€ 1. Auth check â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   send('auth-check');
   let authResult;
   try {
@@ -577,101 +618,6 @@ ipcMain.handle('refresh-account', async (event, { profilePath, accountId }) => {
   if (!authResult.isAuthenticated) {
     return { authenticated: false };
   }
-
-// â”€â”€ Diagnostic Logging Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-
-function extractModelSummaries(body) {
-  if (!body) return [];
-  try {
-    const parsed = JSON.parse(body);
-    const userStatus = parsed.userStatus || parsed;
-    const configs = userStatus.cascadeModelConfigData?.clientModelConfigs || [];
-    return configs.map(cfg => {
-      const q = cfg.quotaInfo || {};
-      return {
-        label: cfg.label || cfg.modelName || cfg.name || 'Unknown',
-        fraction: q.remainingFraction !== undefined ? q.remainingFraction : null,
-        resetTime: q.resetTime || null,
-        fiveHourFraction: q.fiveHourRemainingFraction ?? q.shortTermRemainingFraction ?? null,
-        fiveHourResetTime: q.fiveHourResetTime || q.shortTermResetTime || null
-      };
-    });
-  } catch (e) {
-    return [];
-  }
-}
-
-function logDiagnosticComparison(usedPort, candidatePorts, body1, durationMs1, body2, durationMs2) {
-  console.log('\n' + '='.repeat(80));
-  console.log('  [LUNE DIAGNOSTIC INSTRUMENTATION LOG]');
-  console.log('='.repeat(80));
-  console.log(`  Target Port Used   : ${usedPort}`);
-  console.log(`  Candidate Ports    : [${candidatePorts.join(', ')}] (Total: ${candidatePorts.length})`);
-  console.log(`  Query 1 Timing     : ${durationMs1} ms post-LSP detection (Immediate)`);
-  console.log(`  Query 2 Timing     : ${durationMs2} ms post-LSP detection (+5s delay)`);
-  console.log('-'.repeat(80));
-
-  const models1 = extractModelSummaries(body1);
-  const models2 = extractModelSummaries(body2);
-
-  console.log('\n  [QUERY 1 MODEL QUOTAS & RESET TIMES (t = 0s)]');
-  if (models1.length === 0) {
-    console.log('    (No models found in body 1)');
-  } else {
-    models1.forEach(m => {
-      console.log(`    â€¢ ${m.label.padEnd(25)} | Fraction: ${String(m.fraction).padEnd(8)} | ResetTime: ${m.resetTime || 'N/A'}`);
-      if (m.fiveHourResetTime || m.fiveHourFraction !== null) {
-        console.log(`      â””â”€ 5h Window             | 5hFraction: ${String(m.fiveHourFraction).padEnd(6)} | 5hResetTime: ${m.fiveHourResetTime || 'N/A'}`);
-      }
-    });
-  }
-
-  if (body2) {
-    console.log('\n  [QUERY 2 MODEL QUOTAS & RESET TIMES (t = +5s)]');
-    if (models2.length === 0) {
-      console.log('    (No models found in body 2)');
-    } else {
-      models2.forEach(m => {
-        console.log(`    â€¢ ${m.label.padEnd(25)} | Fraction: ${String(m.fraction).padEnd(8)} | ResetTime: ${m.resetTime || 'N/A'}`);
-        if (m.fiveHourResetTime || m.fiveHourFraction !== null) {
-          console.log(`      â””â”€ 5h Window             | 5hFraction: ${String(m.fiveHourFraction).padEnd(6)} | 5hResetTime: ${m.fiveHourResetTime || 'N/A'}`);
-        }
-      });
-    }
-
-    console.log('\n  [SIDE-BY-SIDE STALENESS COMPARISON]');
-    const allLabels = Array.from(new Set([...models1.map(m => m.label), ...models2.map(m => m.label)]));
-    let anyDifference = false;
-    allLabels.forEach(lbl => {
-      const m1 = models1.find(m => m.label === lbl) || {};
-      const m2 = models2.find(m => m.label === lbl) || {};
-
-      const f1Str = m1.fraction !== undefined && m1.fraction !== null ? m1.fraction.toString() : 'N/A';
-      const f2Str = m2.fraction !== undefined && m2.fraction !== null ? m2.fraction.toString() : 'N/A';
-      const match = f1Str === f2Str && m1.resetTime === m2.resetTime;
-
-      if (!match) anyDifference = true;
-      const statusTag = match ? 'âœ“ IDENTICAL (SETTLED)' : 'âœ– DIFFERENT (SYNCING IN PROGRESS!)';
-
-      console.log(`    ${lbl.padEnd(25)} | Q1 (t=0s): ${f1Str.padEnd(7)} | Q2 (t=+5s): ${f2Str.padEnd(7)} | ${statusTag}`);
-    });
-
-    console.log('\n  [EVIDENCE CONCLUSION]');
-    if (anyDifference) {
-      console.log('    âš  STALENESS DETECTED: Quota data updated between Query 1 and Query 2! The LSP was killed too early during backend sync.');
-    } else {
-      console.log('    âœ“ NO EARLY-KILL STALENESS: Data remained identical across the 5s window. Initial response was already settled.');
-    }
-  }
-
-  console.log('\n  [FULL RAW JSON RESPONSE â€” QUERY 1]');
-  console.log(body1 || '(empty)');
-  if (body2) {
-    console.log('\n  [FULL RAW JSON RESPONSE â€” QUERY 2 (+5s)]');
-    console.log(body2 || '(empty)');
-  }
-  console.log('='.repeat(80) + '\n');
-}
 
   // â”€â”€ 1b. Direct query on already-running instance â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   let queryResponse = null;
@@ -1229,7 +1175,10 @@ async function runLiveWatcher() {
       let parsed = lsp.lastParsedUserStatus;
       let body = lsp.lastRawResponseBody;
 
-      if (!parsed) {
+      // Re-query if we have no parsed result OR the cached result has no email.
+      // A truthy-but-email-less object (e.g. {} from a failed parse) must NOT
+      // prevent a fresh query — otherwise this account would never show as Live.
+      if (!parsed || !parsed.email) {
         for (const port of lsp.ports) {
           watcherInFlightAccounts.add(acc.id);
           try {
@@ -1238,6 +1187,12 @@ async function runLiveWatcher() {
               try {
                 parsed = parseUserStatusBody(res.body);
                 body = res.body;
+                // Backfill cache so resolveAndDeduplicateServers benefits next tick.
+                if (parsed && parsed.email) {
+                  lsp.lastParsedUserStatus = parsed;
+                  lsp.lastRawResponseBody  = body;
+                  lsp.activeEmail          = parsed.email;
+                }
               } catch (_) {}
               break;
             }
