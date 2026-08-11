@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Lune - Agent tracking dashboard</title>
 <meta name="description" content="Monitor AI usage quota across multiple IDE accounts in a unified local dashboard.">
+<link rel="icon" href="build/icon.png" type="image/png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet">
@@ -2547,7 +2548,7 @@ async function runImportScan() {
           } else {
             ACCOUNTS.push(saveRes.account);
           }
-          selectedAccountId = saveRes.account.id;
+          selectedId = saveRes.account.id;
           closeAddModal();
           renderCards();
           renderDetail();

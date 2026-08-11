@@ -1302,8 +1302,11 @@ ipcMain.handle('remove-account', async (event, { accountId }) => {
 
 // â”€â”€ Window factory â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function createWindow() {
+  const iconPath = path.join(__dirname, 'build', process.platform === 'win32' ? 'icon.ico' : 'icon.png');
+
   const win = new BrowserWindow({
     title: 'Lune - Agent tracking dashboard',
+    icon: iconPath,
     width: 1280,
     height: 800,
     minWidth: 900,
