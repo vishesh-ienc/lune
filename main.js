@@ -6,6 +6,11 @@ const fs   = require('fs');
 const path = require('path');
 const ag   = require('./lib/antigravity');
 
+// Suppress Chromium GPU disk-cache errors on Windows (harmless, caused by
+// file-lock contention when a previous process just exited).
+app.commandLine.appendSwitch('disable-gpu-shader-disk-cache');
+app.commandLine.appendSwitch('disable-features', 'DiskCacheBackend');
+
 let mainWindow = null;
 
 // â”€â”€ Authoritative In-Memory Accounts Store â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -136,7 +141,26 @@ function saveAccountsToDisk(accounts) {
     const filePath = getAccountsFilePath();
     backupAccountsFileBeforeWrite(filePath);
     const data = JSON.stringify(clean, null, 2);
-    fs.writeFileSync(filePath, data, 'utf8');
+    const tempPath = filePath + '.tmp';
+    let saved = false;
+    for (let i = 0; i < 3; i++) {
+      try {
+        fs.writeFileSync(tempPath, data, 'utf8');
+        fs.renameSync(tempPath, filePath);
+        saved = true;
+        break;
+      } catch (writeErr) {
+        try { if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath); } catch (_) {}
+        if (i === 2) {
+          // Direct write fallback
+          fs.writeFileSync(filePath, data, 'utf8');
+          saved = true;
+        } else {
+          const start = Date.now();
+          while (Date.now() - start < 50) {}
+        }
+      }
+    }
     logger.debug(`[Lune main.js] Persisted ${clean.length} account(s) to ${filePath}`);
     return { ok: true };
   } catch (err) {
@@ -472,6 +496,28 @@ function buildPoolFromGroupHelper(poolName, models) {
   };
 }
 
+/**
+ * Single source of truth for overall account quota percentage in main process.
+ * Blended / average availability across all valid model pools (OPTION A).
+ * Formula: round((sum of valid pool remainingFraction / number of valid pools) * 100)
+ */
+function calculateOverallQuota(account) {
+  if (!account || !Array.isArray(account.pools) || account.pools.length === 0) {
+    return (account && typeof account.quotaPercent === 'number') ? account.quotaPercent : null;
+  }
+
+  const validPools = account.pools.filter(
+    pool => pool && typeof pool.remainingFraction === 'number' && !isNaN(pool.remainingFraction)
+  );
+
+  if (validPools.length === 0) {
+    return (account && typeof account.quotaPercent === 'number') ? account.quotaPercent : null;
+  }
+
+  const sum = validPools.reduce((accSum, pool) => accSum + pool.remainingFraction, 0);
+  return Math.round((sum / validPools.length) * 100);
+}
+
 function buildAccountFromUserStatusHelper(userStatus, profilePath, existingAccountsCount = 0) {
   let userObj = userStatus.user || userStatus.userInfo || userStatus;
   let name = userObj.name || userObj.displayName || userObj.fullName || userStatus.name || null;
@@ -577,8 +623,7 @@ function buildAccountFromUserStatusHelper(userStatus, profilePath, existingAccou
     buildPoolFromGroupHelper('Claude and GPT models', claudeGptModels)
   ];
 
-  const maxFrac = newAccount.pools.length > 0 ? Math.max(...newAccount.pools.map(p => p.remainingFraction)) : 1.0;
-  newAccount.quotaPercent = Math.round(maxFrac * 100);
+  newAccount.quotaPercent = calculateOverallQuota(newAccount);
 
   return newAccount;
 }
@@ -647,7 +692,7 @@ ipcMain.handle('refresh-account', async (event, { profilePath, accountId }) => {
   let queryResponse = null;
   try {
     logger.debug(`[Lune refresh-account] Checking for already-running instance matching userDataDir=${profilePath}...`);
-    const existingLsp = ag.findRunningLanguageServerForProfile(profilePath);
+    const existingLsp = await ag.findRunningLanguageServerForProfile(profilePath);
     if (existingLsp) {
       logger.debug(`[Lune refresh-account] Found matching running instance for userDataDir=${profilePath} at PID ${existingLsp.pid}`);
       const ports = await ag.findListeningPorts(existingLsp.pid);
@@ -694,7 +739,7 @@ ipcMain.handle('refresh-account', async (event, { profilePath, accountId }) => {
       }
     } catch (err) {
       // Cleanup before returning
-      try { ag.killProcessTree(pid, profilePath); } catch (_) {}
+      try { await ag.killProcessTree(pid, profilePath); } catch (_) {}
       try { ag.closeHiddenDesktop(hDesktop, hProcess); } catch (_) {}
       send('cleanup');
       return { authenticated: true, ok: false, status: 'unreachable', unreachable: true, error: 'lsp-timeout: ' + err.message };
@@ -734,7 +779,7 @@ ipcMain.handle('refresh-account', async (event, { profilePath, accountId }) => {
       }
     } catch (err) {
       // Cleanup before returning
-      try { ag.killProcessTree(pid, profilePath); } catch (_) {}
+      try { await ag.killProcessTree(pid, profilePath); } catch (_) {}
       try { ag.closeHiddenDesktop(hDesktop, hProcess); } catch (_) {}
       send('cleanup');
       return { authenticated: true, ok: false, status: 'unreachable', unreachable: true, error: 'query failed: ' + err.message };
@@ -742,10 +787,7 @@ ipcMain.handle('refresh-account', async (event, { profilePath, accountId }) => {
 
     // ── 5. Cleanup ──────────────────────────────────────────────────────────
     send('cleanup');
-    try { ag.killProcessTree(pid, profilePath); } catch (_) {}
-    // ── 5. Cleanup ──────────────────────────────────────────────────────────
-    send('cleanup');
-    try { ag.killProcessTree(pid, profilePath); } catch (_) {}
+    try { await ag.killProcessTree(pid, profilePath); } catch (_) {}
     try { ag.closeHiddenDesktop(hDesktop, hProcess); } catch (_) {}
   }
 
@@ -960,8 +1002,7 @@ function updateAccountFromUserStatus(acc, parsed) {
       buildPoolFromGroupHelper('Claude and GPT models', claudeGptModels)
     ];
 
-    const maxFrac = acc.pools.length > 0 ? Math.max(...acc.pools.map(p => p.remainingFraction)) : 1.0;
-    acc.quotaPercent = Math.round(maxFrac * 100);
+    acc.quotaPercent = calculateOverallQuota(acc);
   }
 }
 
@@ -1059,7 +1100,7 @@ async function refreshAllAccountsHelper() {
               }
             }
           }
-          try { ag.killProcessTree(pid, profilePath); } catch (_) {}
+          try { await ag.killProcessTree(pid, profilePath); } catch (_) {}
           try { if (hDesktop) ag.closeHiddenDesktop(hDesktop, hProcess); } catch (_) {}
         }
       } catch (err) {

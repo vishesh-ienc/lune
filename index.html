@@ -53,17 +53,16 @@ body {
 .sidebar-logo {
   width: 36px;
   height: 36px;
-  background: #27272a;
-  border: 1px solid #3f3f46;
-  border-radius: 10px;
+  background: transparent;
+  border: none;
   display: flex;
   align-items: center;
   justify-content: center;
   margin-bottom: 20px;
   flex-shrink: 0;
-  transition: background .15s, border-color .15s;
+  transition: opacity .15s;
 }
-.sidebar-logo:hover { background: #3f3f46; border-color: #71717a; }
+.sidebar-logo:hover { opacity: 0.8; }
 
 .sidebar-nav {
   display: flex;
@@ -346,24 +345,35 @@ body {
   border-color: rgba(248, 113, 113, .3);
 }
 
-.card-quota-row { display: flex; align-items: center; gap: 9px; padding-left: 23px; }
+.card-quota-row { display: flex; align-items: center; gap: 8px; padding-left: 23px; }
 
 .quota-bar-wrap {
   flex: 1;
   height: 4px;
   background: #27272a;
   border-radius: 99px;
-  overflow: visible;
+  overflow: hidden;
+  position: relative;
 }
 .quota-bar-fill {
   height: 100%;
   border-radius: 99px;
   transition: width .6s cubic-bezier(.4,0,.2,1);
+  position: relative;
 }
-/* Vivid traffic-light colors — these list bars are the "at a glance" signal */
-.quota-bar-fill.healthy  { background: #34d399; }
-.quota-bar-fill.warn     { background: #fbbf24; }
-.quota-bar-fill.critical { background: #f87171; }
+/* Vivid traffic-light status colors with restrained subtle glow */
+.quota-bar-fill.healthy  {
+  background: #34d399;
+  box-shadow: 0 0 8px rgba(52, 211, 153, 0.5);
+}
+.quota-bar-fill.warn     {
+  background: #fbbf24;
+  box-shadow: 0 0 8px rgba(251, 191, 36, 0.5);
+}
+.quota-bar-fill.critical {
+  background: #f87171;
+  box-shadow: 0 0 8px rgba(248, 113, 113, 0.5);
+}
 
 .quota-pct {
   font-family: 'JetBrains Mono', monospace;
@@ -372,6 +382,106 @@ body {
   min-width: 30px;
   text-align: right;
   flex-shrink: 0;
+  font-weight: 500;
+}
+
+/* ── Chevron Expand Button ── */
+.card-expand-btn {
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 1px solid transparent;
+  color: #71717a;
+  cursor: pointer;
+  transition: background 180ms ease, color 180ms ease, border-color 180ms ease;
+  flex-shrink: 0;
+  padding: 0;
+}
+.card-expand-btn:hover {
+  background: #27272a;
+  border-color: #3f3f46;
+  color: #e4e4e7;
+}
+.card-expand-btn svg {
+  transition: transform 180ms cubic-bezier(.4,0,.2,1);
+}
+.card-expand-btn.expanded svg {
+  transform: rotate(180deg);
+  color: #a1a1aa;
+}
+
+/* ── Expandable Model Breakdown Drawer (Dark Inset Panel — No Glassmorphism) ── */
+.card-breakdown-drawer {
+  margin-top: 8px;
+  padding: 10px 12px;
+  background: #111113;
+  border: 1px solid #222226;
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  animation: drawerFadeIn 180ms ease-out;
+}
+@keyframes drawerFadeIn {
+  from { opacity: 0; transform: translateY(-3px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.breakdown-pool-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.breakdown-pool-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  line-height: 1.3;
+}
+.breakdown-pool-title {
+  color: #d4d4d8;
+  font-weight: 500;
+}
+.breakdown-pool-pct {
+  font-weight: 600;
+  text-align: right;
+}
+.breakdown-pool-pct.gemini { color: #60a5fa; }
+.breakdown-pool-pct.claude { color: #fb923c; }
+
+.breakdown-bar-track {
+  width: 100%;
+  height: 4px;
+  background: #1c1c20;
+  border-radius: 99px;
+  overflow: hidden;
+  position: relative;
+}
+.breakdown-bar-fill {
+  height: 100%;
+  border-radius: 99px;
+  transition: width .5s cubic-bezier(.4, 0, .2, 1);
+}
+.breakdown-bar-fill.gemini {
+  background: #3b82f6;
+  box-shadow: 0 0 6px rgba(59, 130, 246, 0.4);
+}
+.breakdown-bar-fill.claude {
+  background: #f97316;
+  box-shadow: 0 0 6px rgba(249, 115, 22, 0.4);
+}
+
+.breakdown-pool-reset {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9.5px;
+  color: #71717a;
+  line-height: 1.2;
 }
 
 /* ═══════════════════════════════════════════════════════
@@ -1110,22 +1220,12 @@ body {
   <!-- ═══ LEFT RAIL ═══ -->
   <nav class="sidebar" aria-label="Main navigation">
     <div class="sidebar-logo" title="Lune">
-      <svg width="22" height="22" viewBox="0 0 64 64" fill="none">
-        <g>
-          <g>
-            <path fill="#394240" d="M60,0H4C1.789,0,0,1.789,0,4v40c0,2.211,1.789,4,4,4h24v10h-8c-2.209,0-4,1.791-4,4v1c0,0.553,0.447,1,1,1 h30c0.553,0,1-0.447,1-1v-1c0-2.209-1.791-4-4-4h-8V48h24c2.211,0,4-1.789,4-4V4C64,1.789,62.211,0,60,0z M44,60 c1.104,0,2,0.896,2,2H18c0-1.104,0.896-2,2-2H44z M34,58h-4V48h4V58z M62,44c0,1.104-0.896,2-2,2H4c-1.104,0-2-0.896-2-2v-4h60V44 z M62,38H2V4c0-1.104,0.896-2,2-2h56c1.104,0,2,0.896,2,2V38z"/>
-          </g>
-          <g>
-            <path fill="#506C7F" d="M2,40v4c0,1.104,0.896,2,2,2h56c1.104,0,2-0.896,2-2v-4H2z"/>
-            <rect x="30" y="48" fill="#506C7F" width="4" height="10"/>
-            <path fill="#506C7F" d="M44,60H20c-1.104,0-2,0.896-2,2h28C46,60.896,45.104,60,44,60z"/>
-          </g>
-          <g>
-            <path fill="#B4CCB9" d="M2,4v34h60V4c0-1.104-0.896-2-2-2H4C2.896,2,2,2.896,2,4z"/>
-          </g>
-          <circle fill="#394240" cx="32" cy="43" r="2"/>
-          <rect x="30" y="48" opacity="0.3" width="4" height="10"/>
-        </g>
+      <svg width="30" height="30" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="50" cy="50" r="48" fill="#0f1117"/>
+        <circle cx="50" cy="50" r="44" fill="none" stroke="#2ECFB6" stroke-width="6"/>
+        <path d="M 28 72 C 28 58, 42 52, 50 50 C 58 48, 72 42, 72 28"
+              fill="none" stroke="#2ECFB6" stroke-width="8" stroke-linecap="round"/>
+        <circle cx="50" cy="50" r="5.5" fill="#2ECFB6"/>
       </svg>
     </div>
     <div class="sidebar-nav">
@@ -1245,6 +1345,31 @@ const fmt   = n  => (n || 0).toLocaleString();
 const words = tk => Math.round((tk || 0) * 0.75).toLocaleString();
 const esc   = s  => String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 const pctOf = frac => +(frac * 100).toFixed(2);
+
+/**
+ * Single source of truth for overall account quota percentage.
+ * Blended / average availability across all valid model pools (OPTION A).
+ * Formula: round((sum of valid pool remainingFraction / number of valid pools) * 100)
+ *
+ * @param {Object} account - Account object containing pools array
+ * @returns {number|null} Overall quota percentage (0-100), or null if no valid pool data
+ */
+function calculateOverallQuota(account) {
+  if (!account || !Array.isArray(account.pools) || account.pools.length === 0) {
+    return (account && typeof account.quotaPercent === 'number') ? account.quotaPercent : null;
+  }
+
+  const validPools = account.pools.filter(
+    pool => pool && typeof pool.remainingFraction === 'number' && !isNaN(pool.remainingFraction)
+  );
+
+  if (validPools.length === 0) {
+    return (account && typeof account.quotaPercent === 'number') ? account.quotaPercent : null;
+  }
+
+  const sum = validPools.reduce((accSum, pool) => accSum + pool.remainingFraction, 0);
+  return Math.round((sum / validPools.length) * 100);
+}
 
 /**
  * HEURISTIC: Inferred from reset-time distance, NOT an explicit field from the API.
@@ -1636,11 +1761,10 @@ function applyRefreshResultToAccount(acc, result) {
         buildPoolFromGroup('Claude and GPT models', claudeGptModels)
       ];
 
-      // Part 3: Clear estimated flag on real refresh
+      // Clear estimated flag on real refresh
       acc.pools.forEach(p => { p.resetIsEstimated = false; });
 
-      const maxFrac = acc.pools.length > 0 ? Math.max(...acc.pools.map(p => p.remainingFraction)) : 1.0;
-      acc.quotaPercent = Math.round(maxFrac * 100);
+      acc.quotaPercent = calculateOverallQuota(acc);
     } else {
       // No real model quota data in this result — leave existing pools/quotaPercent/stats unchanged
       console.info('[Lune renderer] live-account-update received ok:true but no modelQuotas data — pools left unchanged.');
@@ -1786,8 +1910,7 @@ function mockRefreshAccountObj(acc) {
     acc.stats.flowCredits.rem = Math.max(0, acc.stats.flowCredits.rem - flowDrop);
   }
 
-  const maxFrac = Math.max(...acc.pools.map(p => p.remainingFraction));
-  acc.quotaPercent = Math.round(maxFrac * 100);
+  acc.quotaPercent = calculateOverallQuota(acc);
   acc.lastSync = Date.now();
   saveCurrentAccounts();
 }
@@ -1866,6 +1989,8 @@ let lastSync   = Date.now();
 // Part 10: In-memory set of account IDs that currently have a confirmed live matched process.
 // Starts empty — the watcher flips these on first confirmed match, ~5s after startup.
 const onlineAccountIds = new Set();
+// Track expanded cards for model quota breakdown drawer
+const expandedCardIds = new Set();
 
 function getInitials(name) {
   if (!name) return '??';
@@ -1923,25 +2048,63 @@ function renderCards() {
       (sel ? ' selected' + (st === 'warn' ? ' status-warn' : st === 'critical' ? ' status-crit' : '') : '');
 
     const hasPools = Array.isArray(acc.pools) && acc.pools.length > 0;
+    const isExpanded = hasPools && expandedCardIds.has(acc.id);
+
+    let cardDrawerHtml = '';
     let cardCountdownsHtml = '';
+
     if (hasPools && !acc.refreshStatusLabel && !acc.wrongAccountActive && acc.authenticated !== false && !acc.refreshError) {
       const gPool = acc.pools.find(p => /gemini/i.test(p.name));
       const cPool = acc.pools.find(p => /claude|gpt/i.test(p.name));
+      const gPct = gPool != null ? Math.round((gPool.remainingFraction ?? 0) * 100) : null;
+      const cPct = cPool != null ? Math.round((cPool.remainingFraction ?? 0) * 100) : null;
       const gTime = gPool ? formatDurationCompact(gPool.resetTime, gPool.resetIn) : 'N/A';
       const cTime = cPool ? formatDurationCompact(cPool.resetTime, cPool.resetIn) : 'N/A';
       const gEst = gPool && gPool.resetIsEstimated ? ' (Est)' : '';
       const cEst = cPool && cPool.resetIsEstimated ? ' (Est)' : '';
 
-      cardCountdownsHtml = `
-        <div class="card-countdowns-row" id="card-countdowns-${acc.id}">
-          <svg viewBox="0 0 24 24" fill="none" stroke="#71717a" stroke-width="2.2" width="11" height="11" aria-hidden="true" style="flex-shrink:0;">
-            <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
-          </svg>
-          <span style="color:#71717a; font-weight:500;">Reset:</span>
-          <span id="card-cd-gemini-${acc.id}"><span class="cd-pool-name">Gemini</span> <span class="cd-time-val">${esc(gTime)}</span>${gEst}</span>
-          <span class="pool-cd-sep">·</span>
-          <span id="card-cd-claude-${acc.id}"><span class="cd-pool-name">C+GPT</span> <span class="cd-time-val">${esc(cTime)}</span>${cEst}</span>
-        </div>`;
+      if (isExpanded) {
+        cardDrawerHtml = `
+          <div class="card-breakdown-drawer" id="card-drawer-${acc.id}">
+            ${ gPool != null ? `
+              <div class="breakdown-pool-row">
+                <div class="breakdown-pool-header">
+                  <span class="breakdown-pool-title">Gemini Models</span>
+                  <span class="breakdown-pool-pct gemini">${gPct !== null ? `${gPct}%` : 'N/A'}</span>
+                </div>
+                <div class="breakdown-bar-track">
+                  <div class="breakdown-bar-fill gemini" style="width:${gPct ?? 0}%"></div>
+                </div>
+                <div class="breakdown-pool-reset" id="drawer-cd-gemini-${acc.id}">
+                  ${gTime !== 'N/A' ? `Reset in ${esc(gTime)}${gEst}` : 'No active limit'}
+                </div>
+              </div>` : '' }
+            ${ cPool != null ? `
+              <div class="breakdown-pool-row">
+                <div class="breakdown-pool-header">
+                  <span class="breakdown-pool-title">Claude & GPT Models</span>
+                  <span class="breakdown-pool-pct claude">${cPct !== null ? `${cPct}%` : 'N/A'}</span>
+                </div>
+                <div class="breakdown-bar-track">
+                  <div class="breakdown-bar-fill claude" style="width:${cPct ?? 0}%"></div>
+                </div>
+                <div class="breakdown-pool-reset" id="drawer-cd-claude-${acc.id}">
+                  ${cTime !== 'N/A' ? `Reset in ${esc(cTime)}${cEst}` : 'No active limit'}
+                </div>
+              </div>` : '' }
+          </div>`;
+      } else {
+        cardCountdownsHtml = `
+          <div class="card-countdowns-row" id="card-countdowns-${acc.id}">
+            <svg viewBox="0 0 24 24" fill="none" stroke="#71717a" stroke-width="2.2" width="11" height="11" aria-hidden="true" style="flex-shrink:0;">
+              <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
+            </svg>
+            <span style="color:#71717a; font-weight:500;">Reset:</span>
+            <span id="card-cd-gemini-${acc.id}"><span class="cd-pool-name">Gemini</span> <span class="cd-time-val">${esc(gTime)}</span>${gEst}</span>
+            <span class="pool-cd-sep">·</span>
+            <span id="card-cd-claude-${acc.id}"><span class="cd-pool-name">C+GPT</span> <span class="cd-time-val">${esc(cTime)}</span>${cEst}</span>
+          </div>`;
+      }
     }
 
     const initials = acc.initials || getInitials(acc.name || acc.email);
@@ -1990,12 +2153,20 @@ function renderCards() {
           ` : !isUnsynced ? `
             <div class="quota-bar-wrap"><div class="quota-bar-fill ${st}" style="width:${acc.quotaPercent}%"></div></div>
             <span class="quota-pct">${acc.quotaPercent}%</span>
+            ${hasPools ? `
+              <button class="card-expand-btn${isExpanded ? ' expanded' : ''}" data-eid="${acc.id}" title="${isExpanded ? 'Hide model quota breakdown' : 'Show model quota breakdown'}" aria-label="Toggle model quota breakdown">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="6 9 12 15 18 9"/>
+                </svg>
+              </button>
+            ` : ''}
           ` : acc.lastSync ? `
             <span class="unsynced-label" style="color:#a1a1aa; font-style:normal;">Quota data not available</span>
           ` : `
             <span class="unsynced-label">Not synced yet</span>
           `}
         </div>
+        ${cardDrawerHtml}
         ${cardCountdownsHtml}
       </div>`;
   }).join('');
@@ -2003,6 +2174,18 @@ function renderCards() {
   list.querySelectorAll('.account-card').forEach(card => {
     card.addEventListener('click', () => pick(+card.dataset.id));
     card.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(+card.dataset.id); } });
+  });
+  list.querySelectorAll('.card-expand-btn').forEach(btn => {
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      const id = +btn.dataset.eid;
+      if (expandedCardIds.has(id)) {
+        expandedCardIds.delete(id);
+      } else {
+        expandedCardIds.add(id);
+      }
+      renderCards();
+    });
   });
   list.querySelectorAll('.remove-btn').forEach(btn => {
     btn.addEventListener('click', e => {
@@ -2080,22 +2263,23 @@ async function removeAccount(id) {
 
 function pick(id) { selectedId = id; renderCards(); renderDetail(); }
 
-function formatLastSynced(ts) {
+function formatLastSynced(ts, isAuto) {
   if (!ts) return 'Not synced yet';
+  const prefix = isAuto ? 'Last auto-synced' : 'Last synced';
   const now = Date.now();
   const diffMs = Math.max(0, now - ts);
   const diffMins = Math.floor(diffMs / 60000);
 
   if (diffMins < 15) {
-    if (diffMins < 1) return 'Last synced just now';
-    if (diffMins === 1) return 'Last synced 1 minute ago';
-    return `Last synced ${diffMins} minutes ago`;
+    if (diffMins < 1) return prefix + ' just now';
+    if (diffMins === 1) return prefix + ' 1 minute ago';
+    return `${prefix} ${diffMins} minutes ago`;
   }
 
   const d = new Date(ts);
   const timeStr = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true });
   const dateStr = d.toLocaleDateString([], { day: 'numeric', month: 'long', year: 'numeric' });
-  return `Last synced: ${timeStr}, ${dateStr}`;
+  return `${prefix}: ${timeStr}, ${dateStr}`;
 }
 
 const TIPS = {
@@ -2128,7 +2312,13 @@ function startCountdownTicker() {
         const resetTimeMs = p.resetTime ? new Date(p.resetTime).getTime() : 0;
 
         if (resetTimeMs > 0 && now >= resetTimeMs) {
-          p.remainingFraction = 1.0;
+          // Only auto-reset fraction to 1.0 if this pool was already running on
+          // an estimated timer (no fresh API data). If the pool came from a real
+          // API sync, leave the fraction untouched — we don't know it refilled
+          // without a fresh sync confirming it.
+          if (p.resetIsEstimated) {
+            p.remainingFraction = 1.0;
+          }
           p.resetIsEstimated = true;
 
           const label = getConstraintLabel(p.resetTime, p.resetIn);
@@ -2138,9 +2328,14 @@ function startCountdownTicker() {
         }
 
         if (acc.id === selectedId) {
-          const syncValEl = document.getElementById(`det-sync-val-${acc.id}`);
-          if (syncValEl) {
-            syncValEl.textContent = formatLastSynced(acc.lastSyncedAt || acc.lastSync);
+          // Only update the sync-time element if account is NOT currently live
+          if (!onlineAccountIds.has(acc.id)) {
+            const syncValEl = document.getElementById(`det-sync-val-${acc.id}`);
+            if (syncValEl) {
+              const syncTs = acc.lastSyncedAt || acc.lastAutoSyncedAt || acc.lastSync;
+              const isAuto = !!(acc.lastAutoSyncedAt || acc.lastSyncSource === 'auto');
+              syncValEl.textContent = formatLastSynced(syncTs, isAuto);
+            }
           }
           const descEl = document.getElementById(`pool-desc-${acc.id}-${pi}`);
           const pctEl = document.getElementById(`pool-pct-num-${acc.id}-${pi}`);
@@ -2163,20 +2358,24 @@ function startCountdownTicker() {
       // Update card-level compact countdown line
       const gEl = document.getElementById(`card-cd-gemini-${acc.id}`);
       const cEl = document.getElementById(`card-cd-claude-${acc.id}`);
+      const dgEl = document.getElementById(`drawer-cd-gemini-${acc.id}`);
+      const dcEl = document.getElementById(`drawer-cd-claude-${acc.id}`);
 
-      if (gEl || cEl) {
+      if (gEl || cEl || dgEl || dcEl) {
         const gPool = acc.pools.find(p => /gemini/i.test(p.name));
         const cPool = acc.pools.find(p => /claude|gpt/i.test(p.name));
 
-        if (gEl && gPool) {
+        if (gPool) {
           const gTime = formatDurationCompact(gPool.resetTime, gPool.resetIn);
           const gEst = gPool.resetIsEstimated ? ' (Est)' : '';
-          gEl.innerHTML = `<span class="cd-pool-name">Gemini</span> <span class="cd-time-val">${esc(gTime)}</span>${gEst}`;
+          if (gEl) gEl.innerHTML = `<span class="cd-pool-name">Gemini</span> <span class="cd-time-val">${esc(gTime)}</span>${gEst}`;
+          if (dgEl) dgEl.textContent = gTime !== 'N/A' ? `Reset in ${gTime}${gEst}` : 'No active limit';
         }
-        if (cEl && cPool) {
+        if (cPool) {
           const cTime = formatDurationCompact(cPool.resetTime, cPool.resetIn);
           const cEst = cPool.resetIsEstimated ? ' (Est)' : '';
-          cEl.innerHTML = `<span class="cd-pool-name">C+GPT</span> <span class="cd-time-val">${esc(cTime)}</span>${cEst}`;
+          if (cEl) cEl.innerHTML = `<span class="cd-pool-name">C+GPT</span> <span class="cd-time-val">${esc(cTime)}</span>${cEst}`;
+          if (dcEl) dcEl.textContent = cTime !== 'N/A' ? `Reset in ${cTime}${cEst}` : 'No active limit';
         }
       }
     });
@@ -2334,16 +2533,20 @@ function renderDetail() {
 
     <div class="sync-row">
       <div class="pulse-dot ${st}" aria-hidden="true"></div>
-      <span class="sync-text" id="sync-text-wrap-${acc.id}">
-        <span class="sync-time" id="det-sync-val-${acc.id}">${esc(formatLastSynced(acc.lastSyncedAt || acc.lastSync))}</span>
-        ${acc.unreachable ? `<span class="unreachable-note" style="font-size:11px; color:#71717a; margin-left:6px; font-style:italic;">(Showing last known data — account not currently running)</span>` : ''}
-      </span>
       ${onlineAccountIds.has(acc.id) ? `
-        <span style="display:inline-flex; align-items:center; gap:5px; font-size:11px; color:#4ade80; background:rgba(34,197,94,0.08); border:1px solid rgba(34,197,94,0.2); padding:4px 10px; border-radius:6px; font-weight:500;">
-          <span style="display:inline-block; width:6px; height:6px; border-radius:50%; background:#4ade80; animation:livePulse 2s infinite;"></span>
-          Auto-syncing
+        <!-- Live: hide last-synced, only show auto-syncing badge -->
+        <span class="sync-text" id="sync-text-wrap-${acc.id}">
+          <span style="display:inline-flex; align-items:center; gap:5px; font-size:11px; color:#4ade80; background:rgba(34,197,94,0.08); border:1px solid rgba(34,197,94,0.2); padding:4px 10px; border-radius:6px; font-weight:500;">
+            <span style="display:inline-block; width:6px; height:6px; border-radius:50%; background:#4ade80; animation:livePulse 2s infinite;"></span>
+            Auto-syncing live
+          </span>
         </span>
-      ` : ''}
+      ` : `
+        <span class="sync-text" id="sync-text-wrap-${acc.id}">
+          <span class="sync-time" id="det-sync-val-${acc.id}">${esc(formatLastSynced(acc.lastSyncedAt || acc.lastAutoSyncedAt || acc.lastSync, !!(acc.lastAutoSyncedAt || acc.lastSyncSource === 'auto')))}</span>
+          ${acc.unreachable ? `<span class="unreachable-note" style="font-size:11px; color:#71717a; margin-left:6px; font-style:italic;">(Showing last known data — account not currently running)</span>` : ''}
+        </span>
+      `}
     </div>
     <div class="tracking-notice" style="margin-top:10px; font-size:11.5px; color:#a1a1aa; display:flex; align-items:center; gap:6px; background:rgba(255,255,255,0.02); padding:8px 12px; border-radius:6px; border:1px solid rgba(255,255,255,0.05);">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#818cf8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;">
@@ -2398,21 +2601,24 @@ function timeSince(ts) {
 }
 function tickSync() {
   const sub = document.getElementById('sync-subtitle');
-  const det = document.getElementById('det-sync');
   const acc = ACCOUNTS.find(a => a.id === selectedId);
   if (sub) {
-    const globalSource = (acc && acc.lastSyncSource === 'auto') ? 'Last auto-synced ' : 'Last synced ';
-    sub.textContent = globalSource + timeSince(lastSync);
-  }
-  if (det && acc) {
-    const prefix = (acc.lastSyncSource === 'auto') ? 'Last auto-synced ' : 'Last synced ';
-    const wrap = document.getElementById(`sync-text-wrap-${acc.id}`);
-    if (wrap) {
-      const timeHtml = `<span class="sync-time" id="det-sync">${timeSince(acc.lastSync)}</span>`;
-      const unreachHtml = acc.unreachable ? ` <span class="unreachable-note" style="font-size:11px; color:#71717a; margin-left:6px; font-style:italic;">(Showing last known data — account not currently running)</span>` : '';
-      wrap.innerHTML = `${prefix}${timeHtml}${unreachHtml}`;
+    // If the currently-selected account is live, show live indicator in global subtitle
+    if (acc && onlineAccountIds.has(acc.id)) {
+      sub.textContent = 'Auto-syncing live • real-time';
     } else {
-      det.textContent = timeSince(acc.lastSync);
+      const globalSource = (acc && acc.lastSyncSource === 'auto') ? 'Last auto-synced ' : 'Last synced ';
+      sub.textContent = globalSource + timeSince(lastSync);
+    }
+  }
+  // If account is live, the sync-row shows the live badge (rendered by renderDetail),
+  // so we only update the static sync-time element for offline accounts.
+  if (acc && !onlineAccountIds.has(acc.id)) {
+    const valEl = document.getElementById(`det-sync-val-${acc.id}`);
+    if (valEl) {
+      const syncTs = acc.lastSyncedAt || acc.lastAutoSyncedAt || acc.lastSync;
+      const isAuto = !!(acc.lastAutoSyncedAt || acc.lastSyncSource === 'auto');
+      valEl.textContent = formatLastSynced(syncTs, isAuto);
     }
   }
 }
@@ -2587,6 +2793,9 @@ async function initAccounts() {
         persisted.forEach(acc => {
           if (!acc.profilePath && acc.userDataDir) acc.profilePath = acc.userDataDir;
           if (!acc.userDataDir && acc.profilePath) acc.userDataDir = acc.profilePath;
+          if (Array.isArray(acc.pools) && acc.pools.length > 0) {
+            acc.quotaPercent = calculateOverallQuota(acc);
+          }
           ACCOUNTS.push(acc);
         });
         console.log('[Lune] Loaded from accounts.json:', ACCOUNTS.length, 'account(s)');
@@ -2645,16 +2854,23 @@ async function initAccounts() {
 
       if (!stateChanged) return; // Skip DOM re-render if nothing changed!
 
-      // Full state cleanup on change
+      // Full state cleanup on change — track when accounts go offline
+      const prevOnlineIds = new Set(onlineAccountIds);
       onlineAccountIds.clear();
 
       ACCOUNTS.forEach(acc => {
         const isAccActive = activeIdsSet.has(acc.id);
+        const wasLive = prevOnlineIds.has(acc.id);
         acc.isLive = isAccActive;
 
         if (isAccActive) {
           onlineAccountIds.add(acc.id);
         } else {
+          // Account just went offline — record the last auto-sync timestamp
+          if (wasLive && !isAccActive) {
+            acc.lastAutoSyncedAt = Date.now();
+            acc.lastSyncSource = 'auto';
+          }
           if (acc.status === 'active') {
             acc.status = 'inactive';
           }
@@ -2669,11 +2885,19 @@ async function initAccounts() {
   if (typeof window.api?.onAccountOnlineStatus === 'function') {
     window.api.onAccountOnlineStatus(({ accountId, isOnline }) => {
       const acc = ACCOUNTS.find(a => a.id === accountId);
-      if (acc) acc.isLive = isOnline;
-      if (isOnline) {
-        onlineAccountIds.add(accountId);
-      } else {
-        onlineAccountIds.delete(accountId);
+      if (acc) {
+        const wasLive = onlineAccountIds.has(accountId);
+        acc.isLive = isOnline;
+        if (isOnline) {
+          onlineAccountIds.add(accountId);
+        } else {
+          // Went offline — stamp last auto-sync time
+          if (wasLive) {
+            acc.lastAutoSyncedAt = Date.now();
+            acc.lastSyncSource = 'auto';
+          }
+          onlineAccountIds.delete(accountId);
+        }
       }
       renderCards();
       if (selectedId === accountId) renderDetail();
