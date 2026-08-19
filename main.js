@@ -5,6 +5,7 @@ const logger = require('./lib/logger');
 const fs   = require('fs');
 const path = require('path');
 const ag   = require('./lib/antigravity');
+const { initAutoUpdater } = require('./lib/updater');
 
 // Suppress Chromium GPU disk-cache errors on Windows (harmless, caused by
 // file-lock contention when a previous process just exited).
@@ -1412,6 +1413,7 @@ app.whenReady().then(() => {
   reloadAccountsFromDisk();
 
   createWindow();
+  initAutoUpdater(mainWindow);
 
   // Live Background Watcher runs every 5 seconds (lightweight process-scan, no spawning)
   setInterval(() => {

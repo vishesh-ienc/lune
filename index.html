@@ -484,6 +484,39 @@ body {
   line-height: 1.2;
 }
 
+/* ─── Auto-Updater Status Pill ─── */
+.update-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  font-weight: 500;
+  color: #818cf8;
+  background: rgba(129, 140, 248, 0.08);
+  border: 1px solid rgba(129, 140, 248, 0.25);
+  border-radius: 99px;
+  padding: 2px 8px;
+  letter-spacing: 0.01em;
+  user-select: none;
+  line-height: 1.2;
+}
+.update-status-pill.downloading {
+  color: #38bdf8;
+  background: rgba(56, 189, 248, 0.08);
+  border-color: rgba(56, 189, 248, 0.28);
+}
+.update-status-pill.installing {
+  color: #34d399;
+  background: rgba(52, 211, 153, 0.08);
+  border-color: rgba(52, 211, 153, 0.28);
+}
+.update-status-pill.error {
+  color: #f87171;
+  background: rgba(248, 113, 113, 0.08);
+  border-color: rgba(248, 113, 113, 0.28);
+}
+
 /* ═══════════════════════════════════════════════════════
    RIGHT — DETAIL PANEL
 ═══════════════════════════════════════════════════════ */
@@ -1255,7 +1288,10 @@ body {
   <div class="accounts-panel">
     <div class="panel-header">
       <div class="panel-header-row">
-        <span class="panel-title">Accounts</span>
+        <div style="display:flex;align-items:center;gap:8px;min-width:0;">
+          <span class="panel-title">Accounts</span>
+          <div id="update-status-pill" class="update-status-pill" style="display:none;"></div>
+        </div>
         <div style="display:flex;align-items:center;gap:6px">
           <button class="add-btn" id="add-acc-btn" aria-label="Import active account">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
@@ -2965,6 +3001,56 @@ initAccounts();
   btnAccounts?.addEventListener('click', () => setView(btnAccounts, 'accounts'));
   btnAnalytics?.addEventListener('click', () => setView(btnAnalytics, 'analytics'));
   btnSettings?.addEventListener('click', () => setView(btnSettings, 'settings'));
+}());
+
+/* ═══════════════════════════════════════════════════════
+   AUTO-UPDATER STATUS LISTENER
+═══════════════════════════════════════════════════════ */
+(function initUpdateStatusWatcher() {
+  if (!window.api || !window.api.onUpdateChecking) return;
+  const pill = document.getElementById('update-status-pill');
+  if (!pill) return;
+
+  function showStatus(text, className) {
+    pill.textContent = text;
+    pill.className = 'update-status-pill ' + (className || '');
+    pill.style.display = 'inline-flex';
+  }
+
+  function hideStatus(delayMs = 0) {
+    if (delayMs > 0) {
+      setTimeout(() => { pill.style.display = 'none'; }, delayMs);
+    } else {
+      pill.style.display = 'none';
+    }
+  }
+
+  window.api.onUpdateChecking(() => {
+    showStatus('Checking for updates…', '');
+  });
+
+  window.api.onUpdateAvailable((info) => {
+    showStatus(`Updating to v${info?.version || ''}…`, 'downloading');
+  });
+
+  window.api.onUpdateNotAvailable(() => {
+    hideStatus(1500);
+  });
+
+  window.api.onUpdateDownloadProgress((progress) => {
+    const pct = progress.percent || 0;
+    const speed = progress.bytesPerSecond ? ` • ${(progress.bytesPerSecond / (1024 * 1024)).toFixed(1)} MB/s` : '';
+    showStatus(`Downloading update… ${pct}%${speed}`, 'downloading');
+  });
+
+  window.api.onUpdateDownloaded((info) => {
+    showStatus(`Installing update v${info?.version || ''}…`, 'installing');
+  });
+
+  window.api.onUpdateError((err) => {
+    showStatus(`Update error: ${err?.message || 'Check failed'}`, 'error');
+    hideStatus(4000);
+  });
 }());
 </script>
 </body>

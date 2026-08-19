@@ -132,4 +132,95 @@ contextBridge.exposeInMainWorld('api', {
     return () => ipcRenderer.removeListener('account-online-status-sync', handler);
   },
 
+  // ── Auto-Updater Bridge ───────────────────────────────────────────────────
+
+  /**
+   * Manually check for application updates.
+   * @returns {Promise<{ ok: boolean, inProgress?: boolean, reason?: string, error?: string, updateInfo?: object }>}
+   */
+  checkForUpdates: () => ipcRenderer.invoke('check-for-updates'),
+
+  /**
+   * Start downloading an available application update.
+   * @returns {Promise<{ ok: boolean, inProgress?: boolean, alreadyDownloaded?: boolean, reason?: string, error?: string }>}
+   */
+  downloadUpdate: () => ipcRenderer.invoke('start-download-update'),
+
+  /**
+   * Quit the application and install the downloaded update.
+   * @returns {Promise<{ ok: boolean, reason?: string, error?: string }>}
+   */
+  installUpdate: () => ipcRenderer.invoke('quit-and-install-update'),
+
+  /**
+   * Subscribe to update-checking event emitted when an update check begins.
+   * @param {function} callback
+   * @returns {function} unsubscribe
+   */
+  onUpdateChecking: (callback) => {
+    const handler = (_, payload) => callback(payload);
+    ipcRenderer.on('update-checking', handler);
+    return () => ipcRenderer.removeListener('update-checking', handler);
+  },
+
+  /**
+   * Subscribe to update-available event emitted when a newer release is found.
+   * Callback receives { version: string, releaseDate?: string, releaseNotes?: string }
+   * @param {function} callback
+   * @returns {function} unsubscribe
+   */
+  onUpdateAvailable: (callback) => {
+    const handler = (_, payload) => callback(payload);
+    ipcRenderer.on('update-available', handler);
+    return () => ipcRenderer.removeListener('update-available', handler);
+  },
+
+  /**
+   * Subscribe to update-not-available event emitted when the app is on the latest version.
+   * Callback receives { version: string }
+   * @param {function} callback
+   * @returns {function} unsubscribe
+   */
+  onUpdateNotAvailable: (callback) => {
+    const handler = (_, payload) => callback(payload);
+    ipcRenderer.on('update-not-available', handler);
+    return () => ipcRenderer.removeListener('update-not-available', handler);
+  },
+
+  /**
+   * Subscribe to update-error event emitted on an updater error.
+   * Callback receives { message: string }
+   * @param {function} callback
+   * @returns {function} unsubscribe
+   */
+  onUpdateError: (callback) => {
+    const handler = (_, payload) => callback(payload);
+    ipcRenderer.on('update-error', handler);
+    return () => ipcRenderer.removeListener('update-error', handler);
+  },
+
+  /**
+   * Subscribe to update-download-progress event emitted during update binary download.
+   * Callback receives { percent: number, bytesPerSecond: number, transferred: number, total: number }
+   * @param {function} callback
+   * @returns {function} unsubscribe
+   */
+  onUpdateDownloadProgress: (callback) => {
+    const handler = (_, payload) => callback(payload);
+    ipcRenderer.on('update-download-progress', handler);
+    return () => ipcRenderer.removeListener('update-download-progress', handler);
+  },
+
+  /**
+   * Subscribe to update-downloaded event emitted when the update installer has been downloaded.
+   * Callback receives { version: string, releaseDate?: string, releaseNotes?: string }
+   * @param {function} callback
+   * @returns {function} unsubscribe
+   */
+  onUpdateDownloaded: (callback) => {
+    const handler = (_, payload) => callback(payload);
+    ipcRenderer.on('update-downloaded', handler);
+    return () => ipcRenderer.removeListener('update-downloaded', handler);
+  },
+
 });

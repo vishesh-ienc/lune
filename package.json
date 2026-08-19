@@ -1,6 +1,6 @@
 {
   "name": "lune",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Project initialized.",
   "main": "main.js",
   "scripts": {
@@ -14,6 +14,10 @@
   "author": "",
   "license": "ISC",
   "type": "commonjs",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/vishesh-ienc/lune.git"
+  },
   "devDependencies": {
     "@resvg/resvg-js": "^2.6.2",
     "electron": "^43.2.0",
@@ -21,11 +25,20 @@
     "png-to-ico": "^3.0.2"
   },
   "dependencies": {
+    "electron-updater": "^6.8.9",
     "koffi": "^3.1.4"
   },
   "build": {
     "appId": "com.lune.app",
     "productName": "Lune",
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "vishesh-ienc",
+        "repo": "lune",
+        "releaseType": "release"
+      }
+    ],
     "directories": {
       "output": "dist"
     },
