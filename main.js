@@ -1,6 +1,6 @@
 'use strict';
 
-const { app, BrowserWindow, ipcMain, Menu } = require('electron');
+const { app, BrowserWindow, ipcMain, Menu, nativeImage } = require('electron');
 const logger = require('./lib/logger');
 const fs   = require('fs');
 const path = require('path');
@@ -173,17 +173,26 @@ function saveAccountsToDisk(accounts) {
 
 /**
  * Resolves activeEmail for each running server in the list over HTTP.
- * Keeps all server processes that successfully respond with a valid activeEmail.
- * Deduplicates by activeEmail so each unique authenticated identity is tracked.
+ * Respects priority ordering from findAllActiveRunningLanguageServers:
+ * For each canonical profile directory, selects the top successfully responding server.
+ * Different independent canonical profiles are resolved independently.
  */
 async function resolveAndDeduplicateServers(servers) {
   if (!servers || !Array.isArray(servers) || servers.length === 0) return [];
 
   const resolvedServers = [];
+  const seenProfiles = new Set();
   const seenEmails = new Set();
 
   for (const server of servers) {
     if (!server.ports || server.ports.length === 0 || !server.csrfToken) continue;
+
+    const canonicalProfile = ag.canonicalUserDataDir(server.userDataDir || server.canonicalDir);
+    // If we have already resolved an active server for this canonical profile, skip secondary/stale candidates
+    if (seenProfiles.has(canonicalProfile)) {
+      logger.debug(`[Lune resolve-servers] PID ${server.pid}: skipping secondary candidate for already-resolved profile ${canonicalProfile}`);
+      continue;
+    }
 
     let email = null;
     let parsed = null;
@@ -215,12 +224,14 @@ async function resolveAndDeduplicateServers(servers) {
     server.activeEmail = email;
     server.lastParsedUserStatus = parsed;
     server.lastRawResponseBody = body;
+    server.canonicalDir = canonicalProfile;
 
     const emailLower = email.toLowerCase().trim();
     if (!seenEmails.has(emailLower)) {
       seenEmails.add(emailLower);
+      seenProfiles.add(canonicalProfile);
       resolvedServers.push(server);
-      logger.debug(`[Lune resolve-servers] PID ${server.pid}: resolved email=${email}.`);
+      logger.debug(`[Lune resolve-servers] PID ${server.pid}: resolved email=${email} for profile=${canonicalProfile}.`);
     }
   }
 
@@ -1313,7 +1324,7 @@ async function runLiveWatcher() {
   }
 }
 
-// runNewAccountDetector() removed â€” new account detection is now explicit-only
+// runNewAccountDetector() removed — new account detection is now explicit-only
 // via the "Import Active Account" button in the Add Account modal.
 
 
@@ -1325,7 +1336,7 @@ ipcMain.handle('remove-account', async (event, { accountId }) => {
   const accounts = getAccounts();
   const idx = accounts.findIndex(a => a.id === accountId);
   if (idx === -1) {
-    console.warn(`[Lune remove-account] Account id=${accountId} not found in live array â€” may already be deleted.`);
+    console.warn(`[Lune remove-account] Account id=${accountId} not found in live array — may already be deleted.`);
     return { ok: true }; // idempotent
   }
   const removed = accounts.splice(idx, 1)[0];
@@ -1341,13 +1352,20 @@ ipcMain.handle('remove-account', async (event, { accountId }) => {
   return { ok: true };
 });
 
-// â”€â”€ Window factory â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Window factory ──────────────────────────────────────────────────────────
 function createWindow() {
-  const iconPath = path.join(__dirname, 'build', process.platform === 'win32' ? 'icon.ico' : 'icon.png');
+  const iconFileName = process.platform === 'win32' ? 'icon.ico' : 'icon.png';
+  const iconPath = path.join(__dirname, 'build', iconFileName);
+  let appIcon = null;
+  try {
+    if (fs.existsSync(iconPath)) {
+      appIcon = nativeImage.createFromPath(iconPath);
+    }
+  } catch (_) {}
 
   const win = new BrowserWindow({
     title: 'Lune - Agent tracking dashboard',
-    icon: iconPath,
+    icon: appIcon && !appIcon.isEmpty() ? appIcon : iconPath,
     width: 1280,
     height: 800,
     minWidth: 900,
@@ -1360,6 +1378,10 @@ function createWindow() {
       sandbox: false,                   // preload needs require(); keep false
     },
   });
+
+  if (appIcon && !appIcon.isEmpty()) {
+    try { win.setIcon(appIcon); } catch (_) {}
+  }
 
   win.removeMenu();
   Menu.setApplicationMenu(null);
@@ -1379,10 +1401,10 @@ function createWindow() {
   win.once('ready-to-show', () => win.show());
 }
 
-// â”€â”€ Lifecycle â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Lifecycle ──────────────────────────────────────────────────────────────
 app.whenReady().then(() => {
   if (process.platform === 'win32') {
-    app.setAppUserModelId('com.lune.app');
+    app.setAppUserModelId(app.isPackaged ? 'com.lune.app' : process.execPath);
   }
 
   // Initialise the single authoritative in-memory accounts array from disk.

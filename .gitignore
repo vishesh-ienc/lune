@@ -43,6 +43,15 @@ scripts/verify-lib.js
 
 # Binary Artifacts
 *.exe
+*.dll
+*.pak
+*.dat
+*.bin
+locales/
+resources/
+LICENSE.electron.txt
+LICENSES.chromium.html
+vk_swiftshader_icd.json
 
 # Environment variables
 .env

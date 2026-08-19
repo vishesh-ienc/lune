@@ -2154,7 +2154,7 @@ function renderCards() {
             <div class="quota-bar-wrap"><div class="quota-bar-fill ${st}" style="width:${acc.quotaPercent}%"></div></div>
             <span class="quota-pct">${acc.quotaPercent}%</span>
             ${hasPools ? `
-              <button class="card-expand-btn${isExpanded ? ' expanded' : ''}" data-eid="${acc.id}" title="${isExpanded ? 'Hide model quota breakdown' : 'Show model quota breakdown'}" aria-label="Toggle model quota breakdown">
+              <button class="card-expand-btn${isExpanded ? ' expanded' : ''}" data-eid="${acc.id}" data-custom-tip="${isExpanded ? 'Hide model quota breakdown' : 'Show model quota breakdown'}" title="${isExpanded ? 'Hide model quota breakdown' : 'Show model quota breakdown'}" aria-label="Toggle model quota breakdown">
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
                   <polyline points="6 9 12 15 18 9"/>
                 </svg>
@@ -2178,6 +2178,7 @@ function renderCards() {
   list.querySelectorAll('.card-expand-btn').forEach(btn => {
     btn.addEventListener('click', e => {
       e.stopPropagation();
+      hideTip();
       const id = +btn.dataset.eid;
       if (expandedCardIds.has(id)) {
         expandedCardIds.delete(id);
@@ -2186,6 +2187,11 @@ function renderCards() {
       }
       renderCards();
     });
+  });
+  list.querySelectorAll('[data-tip], [data-custom-tip]').forEach(el => {
+    el.addEventListener('mouseenter', showTip);
+    el.addEventListener('mousemove',  moveTip);
+    el.addEventListener('mouseleave', hideTip);
   });
   list.querySelectorAll('.remove-btn').forEach(btn => {
     btn.addEventListener('click', e => {
