@@ -1,0 +1,156 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build & Publish Release
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify Git tag and package.json version consistency
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $tagVersion = $tag -replace '^v', ''
+          $pkgJson = Get-Content package.json -Raw | ConvertFrom-Json
+          $pkgVersion = $pkgJson.version
+          Write-Host "Git tag: $tag (Normalized: $tagVersion)"
+          Write-Host "package.json version: $pkgVersion"
+          if ($tagVersion -ne $pkgVersion) {
+            Write-Error "Version mismatch! Git tag ($tagVersion) does not match package.json ($pkgVersion)."
+            exit 1
+          }
+          Write-Host "Version consistency check passed."
+
+      - name: Build production release
+        run: npm run dist
+
+      - name: Validate build artifacts and stage release assets
+        shell: pwsh
+        run: |
+          $pkgJson = Get-Content package.json -Raw | ConvertFrom-Json
+          $version = $pkgJson.version
+          $dist = "dist"
+
+          Write-Host "Validating release artifacts for version $version in $dist..."
+
+          $latestYmlPath = Join-Path $dist "latest.yml"
+          if (-not (Test-Path $latestYmlPath)) {
+            Write-Error "latest.yml is missing in $dist!"
+            exit 1
+          }
+
+          $latestYml = Get-Content $latestYmlPath -Raw
+          Write-Host "--- latest.yml ---"
+          Write-Host $latestYml
+          Write-Host "------------------"
+
+          # 1. Verify version in latest.yml
+          if ($latestYml -notmatch "version:\s*$([regex]::Escape($version))") {
+            Write-Error "latest.yml does not report version $version!"
+            exit 1
+          }
+
+          # 2. Verify sha512 and size metadata exist
+          if ($latestYml -notmatch "sha512:\s*.+" -or $latestYml -notmatch "size:\s*\d+") {
+            Write-Error "latest.yml is missing required sha512 or size metadata!"
+            exit 1
+          }
+
+          # 3. Locate primary installer
+          $installerSpace = Join-Path $dist "Lune Setup $version.exe"
+          $installerDash = Join-Path $dist "Lune-Setup-$version.exe"
+          
+          if (Test-Path $installerSpace) {
+            $primaryInstaller = $installerSpace
+          } elseif (Test-Path $installerDash) {
+            $primaryInstaller = $installerDash
+          } else {
+            Write-Error "Installer binary not found in $dist (checked '$installerSpace' and '$installerDash')!"
+            exit 1
+          }
+          Write-Host "Primary installer found: $primaryInstaller"
+
+          # 4. Locate primary blockmap
+          $blockmapSpace = Join-Path $dist "Lune Setup $version.exe.blockmap"
+          $blockmapDash = Join-Path $dist "Lune-Setup-$version.exe.blockmap"
+
+          if (Test-Path $blockmapSpace) {
+            $primaryBlockmap = $blockmapSpace
+          } elseif (Test-Path $blockmapDash) {
+            $primaryBlockmap = $blockmapDash
+          } else {
+            Write-Error "Blockmap file not found in $dist!"
+            exit 1
+          }
+          Write-Host "Primary blockmap found: $primaryBlockmap"
+
+          # 5. Ensure both spaced and dashed copies exist for 100% URL resolution compatibility
+          if (-not (Test-Path $installerSpace)) {
+            Copy-Item $primaryInstaller $installerSpace
+          }
+          if (-not (Test-Path $installerDash)) {
+            Copy-Item $primaryInstaller $installerDash
+          }
+          if (-not (Test-Path $blockmapSpace)) {
+            Copy-Item $primaryBlockmap $blockmapSpace
+          }
+          if (-not (Test-Path $blockmapDash)) {
+            Copy-Item $primaryBlockmap $blockmapDash
+          }
+
+          # 6. Generate permanent unversioned download asset
+          $permanentAsset = Join-Path $dist "Lune.Setup.exe"
+          Copy-Item $primaryInstaller $permanentAsset -Force
+          Write-Host "Created permanent browser download asset: $permanentAsset"
+
+          # 7. Verify size and SHA-512 match between versioned and permanent assets
+          $hash1 = (Get-FileHash $primaryInstaller -Algorithm SHA512).Hash
+          $hash2 = (Get-FileHash $permanentAsset -Algorithm SHA512).Hash
+          $size1 = (Get-Item $primaryInstaller).Length
+          $size2 = (Get-Item $permanentAsset).Length
+
+          if ($size1 -ne $size2 -or $hash1 -ne $hash2) {
+            Write-Error "Permanent asset Lune.Setup.exe verification failed! Checksum or size mismatch."
+            exit 1
+          }
+
+          Write-Host "All release artifacts verified and staged with 100% integrity."
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Lune ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+          make_latest: "true"
+          generate_release_notes: true
+          files: |
+            dist/latest.yml
+            dist/Lune Setup *.exe
+            dist/Lune-Setup-*.exe
+            dist/Lune Setup *.exe.blockmap
+            dist/Lune-Setup-*.exe.blockmap
+            dist/Lune.Setup.exe
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
