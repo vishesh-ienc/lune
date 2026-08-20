@@ -42,7 +42,9 @@ jobs:
           Write-Host "Version consistency check passed."
 
       - name: Build production release
-        run: npm run dist
+        run: npm run dist -- --publish never
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Validate build artifacts and stage release assets
         shell: pwsh
