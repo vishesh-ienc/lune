@@ -174,26 +174,32 @@ function saveAccountsToDisk(accounts) {
 
 /**
  * Resolves activeEmail for each running server in the list over HTTP.
- * Respects priority ordering from findAllActiveRunningLanguageServers:
- * For each canonical profile directory, selects the top successfully responding server.
- * Different independent canonical profiles are resolved independently.
+ *
+ * Deduplication identity = (canonicalProfile, normalizedEmail) composite.
+ *
+ * Rules:
+ *  - Same profile + same email  → true duplicate; discard the later candidate.
+ *  - Same profile + diff email  → two distinct accounts sharing one install; KEEP BOTH.
+ *  - Diff profile  + same email → same account on two separate installs; discard later.
+ *  - Diff profile  + diff email → fully independent; keep both.
+ *
+ * The old logic used seenProfiles alone, which caused the "same profile + different
+ * account" case to incorrectly suppress the second account (Root Cause B).
  */
 async function resolveAndDeduplicateServers(servers) {
   if (!servers || !Array.isArray(servers) || servers.length === 0) return [];
 
   const resolvedServers = [];
-  const seenProfiles = new Set();
+  // Composite key: canonicalProfile + '\x00' + emailLower
+  // Prevents the same (profile, account) pair from appearing twice.
+  const seenProfileEmail = new Set();
+  // Email-only key: prevents the same account from appearing via two different profiles.
   const seenEmails = new Set();
 
   for (const server of servers) {
     if (!server.ports || server.ports.length === 0 || !server.csrfToken) continue;
 
     const canonicalProfile = ag.canonicalUserDataDir(server.userDataDir || server.canonicalDir);
-    // If we have already resolved an active server for this canonical profile, skip secondary/stale candidates
-    if (seenProfiles.has(canonicalProfile)) {
-      logger.debug(`[Lune resolve-servers] PID ${server.pid}: skipping secondary candidate for already-resolved profile ${canonicalProfile}`);
-      continue;
-    }
 
     let email = null;
     let parsed = null;
@@ -228,12 +234,28 @@ async function resolveAndDeduplicateServers(servers) {
     server.canonicalDir = canonicalProfile;
 
     const emailLower = email.toLowerCase().trim();
-    if (!seenEmails.has(emailLower)) {
-      seenEmails.add(emailLower);
-      seenProfiles.add(canonicalProfile);
-      resolvedServers.push(server);
-      logger.debug(`[Lune resolve-servers] PID ${server.pid}: resolved email=${email} for profile=${canonicalProfile}.`);
+
+    // ── Deduplication check ────────────────────────────────────────────────
+    // True duplicate: exact same (profile, email) pair seen before.
+    const profileEmailKey = canonicalProfile + '\x00' + emailLower;
+    if (seenProfileEmail.has(profileEmailKey)) {
+      logger.debug(`[Lune resolve-servers] PID ${server.pid}: TRUE DUPLICATE — same profile (${canonicalProfile}) + same email (${emailLower}); discarding.`);
+      continue;
     }
+
+    // Cross-profile duplicate: same email already resolved from a different profile.
+    // This means it is the same Google account running under two separate installs;
+    // keep the first candidate that responded and discard the later one.
+    if (seenEmails.has(emailLower)) {
+      logger.debug(`[Lune resolve-servers] PID ${server.pid}: CROSS-PROFILE DUPLICATE — email (${emailLower}) already resolved from a different profile; discarding.`);
+      continue;
+    }
+
+    // New unique (profile, email) combination — accept it.
+    seenProfileEmail.add(profileEmailKey);
+    seenEmails.add(emailLower);
+    resolvedServers.push(server);
+    logger.debug(`[Lune resolve-servers] PID ${server.pid}: ACCEPTED — unique account email=${emailLower} for profile=${canonicalProfile}.`);
   }
 
   return resolvedServers;
@@ -358,16 +380,29 @@ let detectScanInFlightPromise = null;
 /**
  * 'detect-running-accounts' — Scan for all active Language Server processes and return
  * candidate accounts along with duplicate registration status.
+ *
+ * Always executes a fresh scan (forceRefresh=true) so that a newly launched
+ * Antigravity IDE process or its listening ports are never hidden by the 2.5 s
+ * process/port-map TTL cache.
+ *
+ * If a background scan is already in progress when the user clicks "Import", this
+ * handler waits for that scan to fully settle and then immediately starts a new
+ * forceRefresh=true scan rather than returning the stale in-flight result.
  */
 ipcMain.handle('detect-running-accounts', async () => {
+  // If another scan is currently running, wait for it to finish before starting
+  // a fresh one. This prevents concurrent mutations to shared scan state while
+  // still guaranteeing the caller gets an up-to-date result.
   if (detectScanInFlightPromise) {
-    logger.debug('[Lune detect-running-accounts] Reusing in-flight scan');
-    return detectScanInFlightPromise;
+    logger.debug('[Lune detect-running-accounts] Another scan in-flight — waiting for it to settle before running fresh forceRefresh scan.');
+    await detectScanInFlightPromise.catch(() => {}); // absorb any error from the old scan
   }
+
+  logger.debug('[Lune detect-running-accounts] Starting fresh forceRefresh=true manual scan.');
 
   detectScanInFlightPromise = (async () => {
     const t0 = Date.now();
-    const rawServers = (await ag.findAllActiveRunningLanguageServers()) || [];
+    const rawServers = (await ag.findAllActiveRunningLanguageServers(true)) || [];
     const tScan = Date.now() - t0;
 
     const tResolveStart = Date.now();
@@ -375,7 +410,7 @@ ipcMain.handle('detect-running-accounts', async () => {
     const tResolve = Date.now() - tResolveStart;
     const tTotal = Date.now() - t0;
 
-    logger.debug(`[SCAN TIMING] total: ${tTotal}ms | scan: ${tScan}ms | resolve: ${tResolve}ms | main-thread blocking: 0ms`);
+    logger.debug(`[SCAN TIMING] total: ${tTotal}ms | scan: ${tScan}ms | resolve: ${tResolve}ms | forceRefresh: true | main-thread blocking: 0ms`);
     logger.debug(`[Lune detect-running-accounts] Found ${servers.length} running Language Server process(es)`);
 
     if (servers.length === 0) {
@@ -435,6 +470,7 @@ ipcMain.handle('detect-running-accounts', async () => {
     detectScanInFlightPromise = null;
   }
 });
+
 
 // Helper for avatar colors
 const AVATAR_PALETTE = ['#1A4038', '#142040', '#3D2010', '#3D1212', '#2A1B40', '#1B3D38', '#382E1B', '#143840'];
@@ -1194,18 +1230,35 @@ async function runLiveWatcher() {
       return;
     }
 
-    const matchMap = ag.matchAccountToRunningProcess(servers, accounts);
+    // ── Two maps serve two different purposes ─────────────────────────────
+    // liveStatusMap  — used ONLY to decide which accounts get the 🟢 Live dot.
+    //                  Calls matchAccountsForLiveStatus() which supports a safe
+    //                  TENTATIVE fallback when activeEmail is not yet resolved.
+    // matchMap       — used for data-refresh / quota queries further below.
+    //                  Calls matchAccountToRunningProcess() which is strictly
+    //                  email+profile and never accepts unresolved LSPs.
+    const liveStatusMap = ag.matchAccountsForLiveStatus(servers, accounts);
+    const matchMap      = ag.matchAccountToRunningProcess(servers, accounts);
     logger.debug(`[Lune watcher] tick — ${servers.length} server(s), ${accounts.length} saved account(s)`);
 
     const currentOnlineAccountIds = new Set();
     const seenActiveEmails = new Set();
 
     for (const acc of accounts) {
-      const lsp = matchMap ? matchMap.get(acc) : null;
+      const liveResult = liveStatusMap ? liveStatusMap.get(acc) : null;
+      const lsp        = liveResult ? liveResult.lsp : null;
+      const matchType  = liveResult ? liveResult.matchType : 'none';
+
+      // An account is considered Live when:
+      //  - 'confirmed': email + profile matched (existing strict behaviour)
+      //  - 'tentative': profile matched but email not yet resolved
+      //    → allows the green dot to appear briefly while the LSP is starting.
+      //    The next watcher cycle will promote to confirmed or demote to offline.
       const isOnline = !!(lsp && lsp.ports && lsp.ports.length > 0 && lsp.csrfToken &&
-                        acc.email && lsp.activeEmail && acc.email.toLowerCase().trim() === lsp.activeEmail.toLowerCase().trim());
+                        (matchType === 'confirmed' || matchType === 'tentative'));
+
       if (isOnline) {
-        const normEmail = acc.email.toLowerCase().trim();
+        const normEmail = (acc.email || '').toLowerCase().trim();
         if (!seenActiveEmails.has(normEmail)) {
           seenActiveEmails.add(normEmail);
           currentOnlineAccountIds.add(acc.id);
