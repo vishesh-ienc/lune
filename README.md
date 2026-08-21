@@ -1,107 +1,130 @@
+<div align="center">
+
 # Lune 🌙
 
-A fast, unified Antigravity profile, quota, and process manager built with Electron.
+### All your Antigravity accounts. One place.
+
+A fast, lightweight Windows desktop application designed to manage, monitor, and track multiple Google Antigravity accounts from a unified dashboard.
+
+[![Website](https://img.shields.io/badge/Website-lune--web--rho.vercel.app-2dd4bf?style=for-the-badge&logo=vercel)](https://lune-web-rho.vercel.app)
+[![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%2F%2011%20(64--bit)-0078D6?style=for-the-badge&logo=windows)](https://github.com/vishesh-ienc/lune/releases/latest/download/Lune.Setup.exe)
+[![Download](https://img.shields.io/badge/Download-Lune.Setup.exe-4ade80?style=for-the-badge&logo=windows-terminal)](https://github.com/vishesh-ienc/lune/releases/latest/download/Lune.Setup.exe)
+[![GitHub Release](https://img.shields.io/github/v/release/vishesh-ienc/lune?style=for-the-badge&color=22c55e)](https://github.com/vishesh-ienc/lune/releases/latest)
+
+---
+
+[**🌐 Visit Official Website**](https://lune-web-rho.vercel.app) • [**📥 Download Installer (.exe)**](https://github.com/vishesh-ienc/lune/releases/latest/download/Lune.Setup.exe) • [**📖 Capabilities**](#-key-capabilities)
+
+</div>
+
+---
+
+## ⚡ What is Lune?
+
+Managing multiple Antigravity accounts shouldn't require mental overhead or constantly switching tabs to check quotas.
+
+**Lune** runs alongside your Antigravity IDE on Windows as a single visibility layer. Import your active Antigravity accounts once: Lune remembers them, tracks their Gemini and Claude/GPT quota pools, monitors 5-hour refresh countdowns, and displays everything in real time.
 
 ---
 
 ## 📥 Download
 
 Always download the latest Windows installer via the permanent direct link:
+
 👉 **[Download Latest Lune (Lune.Setup.exe)](https://github.com/vishesh-ienc/lune/releases/latest/download/Lune.Setup.exe)**
 
-> *Users do not need to search for version tags. The permanent link automatically points to the latest production release on GitHub.*
+> *No need to search for version tags. The permanent link automatically points to the latest production release on GitHub.*
 
 ---
 
 ## ✨ Key Capabilities
 
-- **Multi-Account Quota Tracking**: Live quota percentages, model breakdown (Gemini / Claude), and reset timers.
-- **Language Server Disambiguation**: Process ranking and single-selection mechanism for active IDE workspaces.
-- **Fully Automatic In-App Updates**: Background update detection, automatic download, SHA-512 verification, and seamless relaunch via GitHub Releases.
-- **Data Persistence**: Isolated `%APPDATA%\lune\accounts.json` storage preserved across builds and upgrades.
+- **Unified Account Pool**: Keep all your Antigravity accounts organized in one place. No more hunting through browser tabs or forgotten sessions.
+- **One-Click Session Import**: Automatically detects the active Antigravity profile with a single click. Zero credential re-entry required.
+- **Real-Time Quota Tracking**: Inspect Gemini and Claude/GPT quota pools separately, complete with live percentage meters, prompt/flow credits, and exact 5-hour refresh countdown timers.
+- **Zero-Overhead Auto-Sync**: Lune runs silently in the background on Windows, keeping your account data and limits current without consuming IDE resources.
+- **Automatic In-App Updates**: Background update pipeline powered by `electron-updater` and GitHub Actions with SHA-512 checksum verification.
+- **Persistent Local Storage**: Isolated `%APPDATA%\lune\accounts.json` storage preserved cleanly across application updates.
+
+---
+
+## 🛠️ How It Works
+
+```
+1. Start with Antigravity  ──▶  Ensure Antigravity IDE is running and signed in.
+2. Open Lune               ──▶  Launch Lune on Windows alongside your IDE.
+3. Click Import Account    ──▶  Lune automatically scans for active sessions.
+4. Confirm Detected User   ──▶  Review the detected profile and confirm with 1 click.
+5. Live Dashboard          ──▶  Account is stored in your pool with live quota meters.
+```
 
 ---
 
 ## 🔄 Auto-Updater Architecture
 
-Lune uses an automated, zero-prompt update pipeline powered by `electron-updater` and GitHub Releases:
+Lune features an automated, zero-prompt update pipeline:
 
-```text
+```
 GitHub Release (vX.Y.Z)
-      ↓
+      │
+      ▼
 latest.yml (Release Manifest)
-      ↓
+      │
+      ▼
 electron-updater (Main Process)
-      ↓
-Automatic Background Download (100 MB NSIS Binary)
-      ↓
+      │
+      ▼
+Automatic Background Download (NSIS Installer)
+      │
+      ▼
 SHA-512 Checksum & Blockmap Verification
-      ↓
-NSIS Installer Engine (Silent Update)
-      ↓
-Automatic Client Restart
-      ↓
-Updated Lune Client (vX.Y.Z)
+      │
+      ▼
+Silent Background Update Engine
+      │
+      ▼
+Automatic Client Restart ──▶ Updated Lune Client
 ```
 
 ---
 
-## 🛠️ Development & Production Release Workflow
+## 💻 Development & Build Workflow
 
-### Local Development
+### Prerequisites
+- Node.js 18+ (Node 20+ or 22+ recommended)
+- Windows 10 or 11 (64-bit)
+
+### Local Setup
 ```bash
-# 1. Install dependencies
+# 1. Clone the repository
+git clone https://github.com/vishesh-ienc/lune.git
+cd lune
+
+# 2. Install dependencies
 npm install
 
-# 2. Launch in development mode (Update network checks bypassed)
+# 3. Start in development mode
 npm start
-
-# 3. Run regression test suite
-node scripts/test-lsp-matching.js
 ```
 
-### Production Release Procedure
-All production releases are automated via GitHub Actions ([`.github/workflows/release.yml`](.github/workflows/release.yml)):
-
-1. **Update Version**: Bump `version` in `package.json` and `package-lock.json`:
-   ```bash
-   npm version 1.4.0 --no-git-tag-version
-   ```
-2. **Commit Release Preparation**:
-   ```bash
-   git add package.json package-lock.json
-   git commit -m "Prepare release v1.4.0"
-   git push origin main
-   ```
-3. **Tag Release**: Create and push the corresponding version tag:
-   ```bash
-   git tag v1.4.0
-   git push origin v1.4.0
-   ```
-4. **Automated CI/CD**: GitHub Actions automatically:
-   - Verifies that the Git tag matches `package.json.version`.
-   - Runs clean `npm ci` and builds the production NSIS package on `windows-latest`.
-   - Validates that `latest.yml`, `.blockmap`, and the installer binary match checksums.
-   - Generates the permanent `Lune.Setup.exe` asset.
-   - Publishes the GitHub Release with all 6 required updater assets.
-5. **Verify Release**: Inspect the published release on GitHub Releases.
-6. **Automatic Client Upgrade**: Existing installed Lune clients detect the release on startup and automatically upgrade.
+### Production Build
+```bash
+# Build the NSIS Windows installer
+npm run dist:win
+```
 
 ---
 
-## 📜 Release History & Verification Milestones
+## 🌐 Official Website
 
-### **v1.3.0** — Automated CI/CD & Production Auto-Updater Verification
-- **Automated GitHub Actions Publishing**: Integrated `.github/workflows/release.yml` with automated checksum verification and asset generation.
-- **End-to-End Upgrade Verified**: Packaged Lune v1.2.0 successfully discovered v1.3.0, downloaded the 100.69 MB update, verified SHA-512, installed silently, and restarted cleanly into v1.3.0.
-- **Data Integrity Verified**: 100% preservation of all registered accounts in `%APPDATA%\lune\accounts.json`.
-- **Loop Prevention Verified**: Startup check on v1.3.0 recognizes current version and emits `update-not-available` with zero restart loops.
+The official product landing page for Lune is live at:
+**[https://lune-web-rho.vercel.app](https://lune-web-rho.vercel.app)**
 
-### **v1.2.0** — Automatic In-App Updates Infrastructure
-- Implemented `lib/updater.js` with background auto-download (`autoDownload = true`) and auto-install on quit.
-- Added unobtrusive `#update-status-pill` indicator in the header for live download progress and speed reporting.
-- Established permanent download asset (`Lune.Setup.exe`).
+Source code for the website: [vishesh-ienc/lune-web](https://github.com/vishesh-ienc/lune-web)
 
-### **v1.1.0** — Account Online Detection & LSP Disambiguation
-- Canonicalized default profile paths (`Antigravity` vs `Antigravity IDE`).
-- Implemented active workspace LSP ranking and single active account enforcement.
+---
+
+## 📄 License
+
+Created and maintained by [Vishesh Jiwnani](https://github.com/vishesh-ienc).
+All rights reserved.
